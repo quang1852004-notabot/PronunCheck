@@ -8,20 +8,20 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to VM via SSH
+           - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-                    script: |
+          script: |
             echo "--- Dang cap nhat code tu Git ---"
             cd /home/quang18_5_2004/PronunCheck
             
-            # Kéo code mới nhất về
+            # Keo code moi nhat ve
             git pull origin main
             
-            # Khởi động lại service để áp dụng code mới ngay lập tức
+            # Khoi dong lai service de ap dung code moi ngay lap tuc
             sudo systemctl restart pronuncheck-backend
             sudo systemctl restart pronuncheck-frontend
             
