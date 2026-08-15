@@ -59,6 +59,8 @@ Browser (Ghi âm) → Next.js Frontend (:3000) → FastAPI Backend (:8000) → A
 - [x] Thêm header bar (email + logout) vào trang chính
 - [x] Backend: validate file type (chỉ chấp nhận .wav, .webm, .mp3, .ogg)
 - [x] Backend: giới hạn file size (max 10MB)
+- [x] Tạo `README.md` với thông tin tổng quan dự án
+- [x] Tạo `sync_git.bat` để tự động đồng bộ code lên Git
 
 ---
 
