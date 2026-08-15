@@ -1,0 +1,21 @@
+# Python virtual environment
+venv/
+env/
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Temp directories for audio
+temp/
+temp_audio/
+test/
+
+# OS generated files
+.DS_Store
+Thumbs.db

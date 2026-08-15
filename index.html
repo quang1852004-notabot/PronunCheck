@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luyện Phát Âm - Học Sinh</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f4f4f9; }
+        .container { max-width: 500px; margin: 0 auto; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        button { padding: 15px 30px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; margin: 10px; color: white; }
+        #startBtn { background-color: #4CAF50; }
+        #stopBtn { background-color: #f44336; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #result { margin-top: 20px; font-size: 18px; text-align: left; background: #eef; padding: 15px; border-radius: 5px; display: none; }
+        .score { font-size: 24px; font-weight: bold; color: #2196F3; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Bài tập: Phát âm vần "sch"</h2>
+    <p>Hãy đọc từ: <strong>Schule</strong> (Trường học)</p>
+    
+    <button id="startBtn">🎤 Bắt đầu Ghi âm</button>
+    <button id="stopBtn" disabled>⏹️ Dừng & Chấm điểm</button>
+
+    <div id="result">
+        <p>Điểm vần mục tiêu (sch): <span class="score" id="targetScore">0</span>/100</p>
+        <p>Điểm cả từ: <span class="score" id="totalScore">0</span>/100</p>
+        <p>Nhận xét: <strong id="feedback">...</strong></p>
+    </div>
+</div>
+
+<script>
+    let mediaRecorder;
+    let audioChunks = [];
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const resultDiv = document.getElementById('result');
+
+    startBtn.onclick = async () => {
+        try {
+            // Xin quyền Micro
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                audioChunks = [];
+                sendAudioToAPI(audioBlob); // Gửi file cho não bộ xử lý
+            };
+
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            resultDiv.style.display = 'none';
+            startBtn.innerText = "🔴 Đang ghi âm...";
+        } catch (err) {
+            alert("Không thể truy cập Micro! Vui lòng cấp quyền.");
+        }
+    };
+
+    stopBtn.onclick = () => {
+        mediaRecorder.stop();
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        startBtn.innerText = "⏳ Đang chấm điểm...";
+    };
+
+    async function sendAudioToAPI(audioBlob) {
+        // Gói audio và cấu hình vào form
+        const formData = new FormData();
+        formData.append("audio_file", audioBlob, "record.webm");
+        formData.append("expected_word", "Schule");
+        formData.append("target_phoneme", "ʃ"); 
+
+        try {
+            // Gọi Backend FastAPI đang chạy ở port 8000
+            const response = await fetch("http://127.0.0.1:8000/api/v1/assess", {
+                method: "POST",
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            // Hiển thị kết quả
+            document.getElementById('targetScore').innerText = data.assessment.target_phoneme_score;
+            document.getElementById('totalScore').innerText = data.assessment.overall_word_score;
+            document.getElementById('feedback').innerText = data.assessment.feedback;
+            document.getElementById('feedback').style.color = data.assessment.is_passed ? "green" : "red";
+            
+            resultDiv.style.display = 'block';
+            startBtn.innerText = "🎤 Ghi âm lại";
+        } catch (error) {
+            alert("Lỗi kết nối đến máy chủ chấm điểm!");
+            startBtn.innerText = "🎤 Bắt đầu Ghi âm";
+        }
+    }
+</script>
+
+</body>
+</html>
