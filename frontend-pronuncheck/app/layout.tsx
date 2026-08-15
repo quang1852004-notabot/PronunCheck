@@ -1,7 +1,10 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/app/contexts/AuthContext";
+
+// Tat static prerendering - Firebase can browser APIs nen khong the chay server-side
+export const dynamic = "force-dynamic";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,11 +17,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PronunCheck - Luyện Phát Âm",
-  description: "Ứng dụng kiểm tra phát âm tiếng Đức cho học sinh",
+  title: "PronunCheck - Luyen Phat Am",
+  description: "Ung dung kiem tra phat am tieng Duc cho hoc sinh",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
