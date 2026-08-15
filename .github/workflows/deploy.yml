@@ -21,6 +21,10 @@ jobs:
             # Keo code moi nhat ve
             git pull origin main
             
+            # Cài đặt các thư viện mới nếu có
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
             # Khoi dong lai service de ap dung code moi ngay lap tuc
             sudo systemctl restart pronuncheck-backend
             sudo systemctl restart pronuncheck-frontend
