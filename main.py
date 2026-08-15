@@ -1,16 +1,85 @@
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import os
 import uuid
+import numpy as np
 import torch
+from concurrent.futures import ThreadPoolExecutor
+import uvicorn
+
+# Import cấu hình tập trung từ config.py
+import config
 
 # Các thư viện AI
 from faster_whisper import WhisperModel
+from faster_whisper.audio import decode_audio
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 
-# Khởi tạo ứng dụng FastAPI
-app = FastAPI(title="Pronunciation Assessment API (Hybrid AI)", version="2.0")
+# ==========================================
+# CẤU HÌNH PHẦN CỨNG & ĐA LUỒNG CPU
+# ==========================================
+if config.DEVICE == "cpu" and config.TORCH_CPU_THREADS:
+    torch.set_num_threads(config.TORCH_CPU_THREADS)
+
+os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+
+# Khởi tạo ThreadPoolExecutor để chạy song song các mô hình AI trong 1 request
+executor = ThreadPoolExecutor(max_workers=config.PARALLEL_AI_WORKERS)
+
+# ==========================================
+# KHỞI TẠO CÁC MÔ HÌNH AI (Global)
+# ==========================================
+print(f"Loading AI models on {config.DEVICE.upper()} (Compute Type: {config.COMPUTE_TYPE})...")
+
+# 1. Tải Faster-Whisper
+try:
+    whisper_model = WhisperModel(
+        config.WHISPER_MODEL_NAME,
+        device=config.DEVICE,
+        compute_type=config.COMPUTE_TYPE,
+        cpu_threads=config.WHISPER_CPU_THREADS,
+        num_workers=config.WHISPER_NUM_WORKERS
+    )
+except Exception as e:
+    print(f"Error loading Faster-Whisper: {e}")
+    whisper_model = None
+
+# 2. Tải Wav2Vec2 (Phoneme Recognition)
+try:
+    w2v_processor = Wav2Vec2Processor.from_pretrained(config.WAV2VEC_MODEL_NAME)
+    w2v_model = Wav2Vec2ForCTC.from_pretrained(config.WAV2VEC_MODEL_NAME).to(config.DEVICE)
+    w2v_model.eval() # Chuyển sang inference mode
+except Exception as e:
+    print(f"Error loading Wav2Vec2: {e}")
+    w2v_processor, w2v_model = None, None
+
+# ==========================================
+# WARM-UP MODEL KHI KHỞI ĐỘNG (Tránh giật lag request đầu tiên)
+# ==========================================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Warming up AI models for instant first response...", flush=True)
+    try:
+        dummy_audio = np.zeros(16000, dtype=np.float32) # 1 giây âm thanh tĩnh
+        if whisper_model:
+            list(whisper_model.transcribe(dummy_audio, beam_size=1, language="de", word_timestamps=True)[0])
+        if w2v_model and w2v_processor:
+            inputs = w2v_processor(dummy_audio, sampling_rate=16000, return_tensors="pt").to(config.DEVICE)
+            with torch.inference_mode():
+                _ = w2v_model(**inputs).logits
+        print("Models warmed up and ready!", flush=True)
+    except Exception as e:
+        print(f"Warmup warning: {e}", flush=True)
+    yield
+
+# Khởi tạo ứng dụng FastAPI với lifespan
+app = FastAPI(
+    title="Pronunciation Assessment API (Hybrid AI - Ultra Fast)",
+    version="2.1",
+    lifespan=lifespan
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,109 +88,64 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "temp_audio"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# ==========================================
-# BƯỚC 0: KHỞI TẠO CÁC MÔ HÌNH AI (Global)
-# ==========================================
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8" # Dùng int8 trên CPU để nhẹ hơn
-
-print(f"Loading AI models on {DEVICE.upper()}... This might take a few minutes.")
-
-# 1. Tải WhisperModel (Faster-Whisper) thay cho WhisperX để tương thích Python 3.12
-try:
-    whisper_model = WhisperModel("base", device=DEVICE, compute_type=COMPUTE_TYPE)
-except Exception as e:
-    print(f"Error loading Faster-Whisper: {e}")
-    whisper_model = None
-
-# 2. Tải Wav2Vec2 (Phoneme Recognition)
-try:
-    w2v_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-large-xlsr-53-german")
-    w2v_model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-large-xlsr-53-german").to(DEVICE)
-except Exception as e:
-    print(f"Error loading Wav2Vec2: {e}")
-    w2v_processor, w2v_model = None, None
-
-print("Models loaded successfully!")
-
 
 # ==========================================
 # BƯỚC 2A: PHÂN TÍCH VỚI WAV2VEC2 (Phoneme)
 # ==========================================
-def analyze_with_wav2vec2(file_path: str):
-    if not w2v_model:
+def analyze_with_wav2vec2(audio_array: np.ndarray) -> float:
+    if not w2v_model or not w2v_processor:
         return 0.5 
     
-    from faster_whisper.audio import decode_audio
-    
     try:
-        # decode_audio returns 1D numpy array, 16000Hz float32
-        audio_array = decode_audio(file_path, sampling_rate=16000)
+        inputs = w2v_processor(audio_array, sampling_rate=16000, return_tensors="pt").to(config.DEVICE)
+        with torch.inference_mode():
+            logits = w2v_model(**inputs).logits
+
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        max_probs, _ = torch.max(probs, dim=-1)
+        
+        return float(max_probs.mean().item())
     except Exception as e:
-        print(f"Error decoding audio: {e}")
+        print(f"Error in Wav2Vec2 inference: {e}", flush=True)
         return 0.5
-
-    inputs = w2v_processor(audio_array, sampling_rate=16000, return_tensors="pt").to(DEVICE)
-    with torch.no_grad():
-        logits = w2v_model(**inputs).logits
-
-    probs = torch.nn.functional.softmax(logits, dim=-1)
-    max_probs, _ = torch.max(probs, dim=-1)
-    
-    avg_confidence = max_probs.mean().item()
-    return avg_confidence
 
 
 # ==========================================
 # BƯỚC 2B: PHÂN TÍCH VỚI FASTER-WHISPER
 # ==========================================
-def analyze_with_whisperx(file_path: str, expected_word: str):
-    """
-    Sử dụng Faster-Whisper để transcribe và lấy word-level probability.
-    Hàm này thay thế cho WhisperX để tránh lỗi tương thích Python 3.12.
-    """
+def analyze_with_whisperx(audio_array: np.ndarray, expected_word: str) -> float:
     if not whisper_model:
         return 0.5
 
-    # Lấy word_timestamps để nhận word-level confidence
-    segments, info = whisper_model.transcribe(file_path, beam_size=5, language="de", word_timestamps=True)
-    
-    word_confidence = 0.0
-    segments_list = list(segments) # Chuyển generator thành list
-    
-    for segment in segments_list:
-        for word in segment.words:
-            # Nếu tìm thấy từ giống expected_word (có thể dính dấu câu nên dùng in)
-            if expected_word.lower() in word.word.lower():
-                word_confidence = word.probability
+    try:
+        segments, _ = whisper_model.transcribe(
+            audio_array,
+            beam_size=5,
+            language="de",
+            word_timestamps=True
+        )
+        
+        word_confidence = 0.0
+        for segment in segments:
+            for word in segment.words:
+                if expected_word.lower() in word.word.lower():
+                    word_confidence = word.probability
+                    break
+            if word_confidence > 0.0:
                 break
-                
-    # Nếu không tìm thấy chính xác từ đó, tức là người dùng đọc hoàn toàn sai thành từ khác.
-    # Trong trường hợp này, điểm phải là 0.0 thay vì lấy trung bình độ tự tin của các từ bị nói sai.
-    # (Loại bỏ đoạn tính total_prob / word_count để tránh bug "nói sai vẫn điểm cao")
-
-    return word_confidence
+                    
+        return float(word_confidence)
+    except Exception as e:
+        print(f"Error in Whisper inference: {e}", flush=True)
+        return 0.5
 
 
 # ==========================================
 # BƯỚC 3: HYBRID SCORING ENGINE
 # ==========================================
 def calculate_pronunciation_score(w2v_score: float, whisper_score: float, threshold=0.6, w1=0.4, w2=0.6, target_phoneme="sch"):
-    """
-    Kết hợp điểm từ 2 mô hình (Wav2Vec2 và WhisperX).
-    w1: Trọng số của Wav2Vec2 (Lắng nghe âm thanh thô)
-    w2: Trọng số của WhisperX (Khớp với kịch bản chuẩn)
-    """
-    # Tính điểm mục tiêu kết hợp
     final_target_score = (w2v_score * w1) + (whisper_score * w2)
-    
-    # Quy đổi ra thang điểm 100
     final_score_100 = round(final_target_score * 100, 2)
-    
-    # Đánh giá Pass/Fail
     is_passed = bool(final_target_score >= threshold)
 
     return {
@@ -131,11 +155,6 @@ def calculate_pronunciation_score(w2v_score: float, whisper_score: float, thresh
         "is_passed": is_passed,
         "feedback": "Phát âm rất rõ ràng và chuẩn xác!" if is_passed else f"Âm thanh chưa khớp với từ chuẩn. Hãy phát âm rõ hơn vần/âm '{target_phoneme}'."
     }
-
-
-ALLOWED_EXTENSIONS = {"wav", "webm", "mp3", "ogg"}
-MAX_FILE_SIZE_MB = 10
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 
 # ==========================================
@@ -150,27 +169,35 @@ def assess_pronunciation(
     w1: float = Form(0.4),
     w2: float = Form(0.6)
 ):
+    temp_filename = ""
+    file_path = ""
     try:
         file_extension = audio_file.filename.split(".")[-1].lower() if audio_file.filename else ""
-        if file_extension not in ALLOWED_EXTENSIONS:
+        if file_extension not in config.ALLOWED_EXTENSIONS:
             return JSONResponse(status_code=400, content={"status": "error", "message": "Sai định dạng."})
 
         file_content = audio_file.file.read()
-        if len(file_content) > MAX_FILE_SIZE_BYTES:
+        max_bytes = config.MAX_FILE_SIZE_MB * 1024 * 1024
+        if len(file_content) > max_bytes:
             return JSONResponse(status_code=400, content={"status": "error", "message": "File quá lớn."})
 
         temp_filename = f"{uuid.uuid4()}.{file_extension}"
-        file_path = os.path.join(UPLOAD_DIR, temp_filename)
+        file_path = os.path.join(config.UPLOAD_DIR, temp_filename)
         
         with open(file_path, "wb") as buffer:
             buffer.write(file_content)
 
-        # CHẠY 2 MÔ HÌNH AI SONG SONG (TUẦN TỰ)
-        print(f"Starting assessment for file {temp_filename}...", flush=True)
-        w2v_score = analyze_with_wav2vec2(file_path)
-        whisper_score = analyze_with_whisperx(file_path, expected_word)
+        # 1. Decode âm thanh DUY NHẤT 1 LẦN sang float32 16kHz
+        audio_array = decode_audio(file_path, sampling_rate=16000)
 
-        # TÍNH ĐIỂM HYBRID (VD: Wav2Vec chiếm 40%, Whisper chiếm 60%)
+        # 2. CHẠY ĐỒNG THỜI CẢ 2 MÔ HÌNH TRÊN ĐA LUỒNG CPU
+        future_w2v = executor.submit(analyze_with_wav2vec2, audio_array)
+        future_whisper = executor.submit(analyze_with_whisperx, audio_array, expected_word)
+
+        w2v_score = future_w2v.result()
+        whisper_score = future_whisper.result()
+
+        # 3. TÍNH ĐIỂM HYBRID
         assessment_result = calculate_pronunciation_score(
             w2v_score=w2v_score,
             whisper_score=whisper_score,
@@ -180,8 +207,6 @@ def assess_pronunciation(
             target_phoneme=target_phoneme
         )
 
-        os.remove(file_path)
-        
         return JSONResponse(content={
             "status": "success",
             "word": expected_word,
@@ -193,8 +218,20 @@ def assess_pronunciation(
         import traceback
         err_msg = traceback.format_exc()
         print("API Error:", err_msg, flush=True)
-        if 'file_path' in locals() and os.path.exists(file_path):
-            os.remove(file_path)
         return JSONResponse(status_code=500, content={"status": "error", "message": err_msg})
+    finally:
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
 
-# uvicorn main:app --reload
+
+if __name__ == "__main__":
+    print(f"Starting server on http://{config.HOST}:{config.PORT} with {config.WORKERS} workers...")
+    uvicorn.run(
+        "main:app",
+        host=config.HOST,
+        port=config.PORT,
+        workers=config.WORKERS
+    )

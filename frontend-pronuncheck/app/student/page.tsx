@@ -167,7 +167,8 @@ function FreeModeView() {
     formData.append('target_phoneme', phoneme);
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/assess', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
+      const response = await fetch(`${apiUrl}/api/v1/assess`, {
         method: 'POST',
         body: formData,
       });
@@ -464,7 +465,8 @@ function ClassModeView({ user }: { user: any }) {
 
     try {
       // 1. Call API
-      const response = await fetch('http://127.0.0.1:8000/api/v1/assess', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
+      const response = await fetch(`${apiUrl}/api/v1/assess`, {
         method: 'POST',
         body: formData,
       });

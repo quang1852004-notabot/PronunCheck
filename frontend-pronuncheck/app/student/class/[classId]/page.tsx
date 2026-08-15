@@ -101,7 +101,8 @@ function ClassPageContent({ classId }: { classId: string }) {
       formData.append('w1', classData.scoringConfig.w1.toString());
       formData.append('w2', classData.scoringConfig.w2.toString());
 
-      const res = await fetch('http://127.0.0.1:8000/api/v1/assess', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
+      const res = await fetch(`${apiUrl}/api/v1/assess`, {
         method: 'POST',
         body: formData,
       });
