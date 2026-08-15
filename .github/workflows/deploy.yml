@@ -14,17 +14,15 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
+                    script: |
             echo "--- Dang cap nhat code tu Git ---"
-            # Tu dong tim thu muc PronunCheck hoac DT3_PronunCheck tren VM
-            if [ -d "~/DT3_PronunCheck" ]; then
-              cd ~/DT3_PronunCheck
-            elif [ -d "~/PronunCheck" ]; then
-              cd ~/PronunCheck
-            else
-              echo "Khong tim thay thu muc repo tren VM!"
-              exit 1
-            fi
+            cd /home/quang18_5_2004/PronunCheck
             
+            # Kéo code mới nhất về
             git pull origin main
-            echo "--- Cap nhat thanh cong! ---"
+            
+            # Khởi động lại service để áp dụng code mới ngay lập tức
+            sudo systemctl restart pronuncheck-backend
+            sudo systemctl restart pronuncheck-frontend
+            
+            echo "--- Cap nhat va khoi dong lai thanh cong! ---"
