@@ -2,7 +2,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/app/contexts/AuthContext';
+import { useLanguage } from '@/app/contexts/LanguageContext';
 import AuthGuard from '@/app/components/AuthGuard';
+import { LanguageSelector } from '@/app/components/LanguageSelector';
 import { useRouter } from 'next/navigation';
 import { Mic, Upload, LogOut, ArrowLeft, CheckCircle, XCircle } from 'lucide-react';
 import { db, storage } from '@/app/firebase';
@@ -16,6 +18,7 @@ interface AssessmentResult {
 
 export default function StudentDashboard() {
   const { user, userRole, logout } = useAuth();
+  const { t } = useLanguage();
   const router = useRouter();
   
   const [mode, setMode] = useState<'dashboard' | 'free' | 'class'>('dashboard');
@@ -43,13 +46,14 @@ export default function StudentDashboard() {
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <h1 className="text-xl font-bold text-lime-400">PronunCheck <span className="text-sm font-normal text-gray-400">| Học sinh</span></h1>
+            <h1 className="text-xl font-bold text-lime-400">{t('app.title')} <span className="text-sm font-normal text-gray-400">| {t('role.student')}</span></h1>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-gray-400 text-sm hidden sm:block">{user?.email}</span>
+            <LanguageSelector />
             <button onClick={handleLogout} className="text-red-400 hover:text-red-300 font-medium px-3 py-1.5 rounded-lg hover:bg-red-400/10 transition-colors flex items-center gap-2">
               <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Đăng xuất</span>
+              <span className="hidden sm:inline">{t('auth.logout')}</span>
             </button>
           </div>
         </header>

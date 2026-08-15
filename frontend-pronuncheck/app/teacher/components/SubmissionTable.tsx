@@ -75,7 +75,9 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                     {sub.studentEmail}
                   </td>
                   <td className="px-6 py-4">{sub.word}</td>
-                  <td className="px-6 py-4 text-center">{sub.attemptNumber}</td>
+                  <td className="px-6 py-4 text-center">
+                    {sub.attemptNumber} / {assignments.find(a => a.id === sub.assignmentId)?.maxAttempts || '?'}
+                  </td>
                   <td className="px-6 py-4 text-center">
                     {(sub.detailedScore.wav2vec_raw_score * 100).toFixed(1)}%
                   </td>

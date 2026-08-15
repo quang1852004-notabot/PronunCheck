@@ -91,6 +91,21 @@ function ClassPageContent({ classId }: { classId: string }) {
     setAssessmentResult(null);
 
     try {
+      // Re-verify attempts directly from firestore to prevent bypass
+      const subs = await getSubmissionsByStudent(classId, user.uid, assignmentId);
+      const assignment = assignments.find(a => a.id === assignmentId);
+      const maxAttempts = assignment?.maxAttempts || 1;
+
+      if (subs.length >= maxAttempts) {
+        alert('Bạn đã hết lượt nộp bài cho bài tập này.');
+        // Update local state to reflect limit reached
+        setAssignments(prev => prev.map(a => 
+          a.id === assignmentId ? { ...a, attemptsUsed: subs.length } : a
+        ));
+        setSubmittingId(null);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('audio_file', blob, 'recording.webm');
       formData.append('expected_word', expectedWord);
@@ -116,8 +131,7 @@ function ClassPageContent({ classId }: { classId: string }) {
       // Upload audio to storage
       const storagePath = await uploadAudio(classId, assignmentId, user.uid, blob);
       
-      const assignment = assignments.find(a => a.id === assignmentId);
-      const attemptNumber = (assignment?.attemptsUsed || 0) + 1;
+      const attemptNumber = subs.length + 1;
 
       // Save submission to firestore
       await createSubmission(classId, {
@@ -215,6 +229,7 @@ function ClassPageContent({ classId }: { classId: string }) {
           assignments.map((assignment) => {
             const isDeadlinePassed = assignment.deadline ? assignment.deadline.toDate() < new Date() : false;
             const isMaxAttemptsReached = assignment.attemptsUsed >= assignment.maxAttempts;
+            const remainingAttempts = Math.max(0, assignment.maxAttempts - assignment.attemptsUsed);
             
             let statusBadge = null;
             if (assignment.isPassed) {
@@ -238,7 +253,7 @@ function ClassPageContent({ classId }: { classId: string }) {
                     <h3 className="text-3xl font-bold text-white mb-2">{assignment.word}</h3>
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400">
                       <span className="bg-gray-700 px-2 py-1 rounded-md">Âm mục tiêu: <strong className="text-lime-400">{assignment.targetPhoneme}</strong></span>
-                      <span>Số lần: {assignment.attemptsUsed}/{assignment.maxAttempts}</span>
+                      <span>Còn lại: {remainingAttempts}/{assignment.maxAttempts} lượt</span>
                       {assignment.deadline && (
                         <span>Hạn: {assignment.deadline.toDate().toLocaleString('vi-VN')}</span>
                       )}

@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/app/contexts/AuthContext';
+import { useLanguage } from '@/app/contexts/LanguageContext';
 import AuthGuard from '@/app/components/AuthGuard';
+import { LanguageSelector } from '@/app/components/LanguageSelector';
 import { useRouter } from 'next/navigation';
 import { db } from '@/app/firebase';
 import { collection, query, where, getDocs, doc, setDoc, addDoc, deleteDoc } from 'firebase/firestore';
@@ -19,6 +21,7 @@ function generateClassId() {
 
 export default function TeacherDashboard() {
   const { user, userRole, logout } = useAuth();
+  const { t } = useLanguage();
   const router = useRouter();
   
   const [classes, setClasses] = useState<any[]>([]);
@@ -86,13 +89,14 @@ export default function TeacherDashboard() {
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <h1 className="text-xl font-bold text-blue-400">PronunCheck <span className="text-sm font-normal text-gray-400">| Giáo viên</span></h1>
+            <h1 className="text-xl font-bold text-blue-400">{t('app.title')} <span className="text-sm font-normal text-gray-400">| {t('role.teacher')}</span></h1>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-gray-400 text-sm hidden sm:block">{user?.email}</span>
+            <LanguageSelector />
             <button onClick={handleLogout} className="text-red-400 hover:text-red-300 font-medium px-3 py-1.5 rounded-lg hover:bg-red-400/10 transition-colors flex items-center gap-2">
               <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Đăng xuất</span>
+              <span className="hidden sm:inline">{t('auth.logout')}</span>
             </button>
           </div>
         </header>

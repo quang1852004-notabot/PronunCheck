@@ -2,6 +2,8 @@
 
 import React, { useState, Suspense } from 'react';
 import { useAuth } from '@/app/contexts/AuthContext';
+import { useLanguage } from '@/app/contexts/LanguageContext';
+import { LanguageSelector } from '@/app/components/LanguageSelector';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 function LoginContent() {
@@ -11,6 +13,7 @@ function LoginContent() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login, register, userRole } = useAuth();
+  const { t } = useLanguage();
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -51,15 +54,20 @@ function LoginContent() {
     }
   };
 
+  const roleText = targetRole === 'teacher' ? t('role.teacher') : t('role.student');
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
+    <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4 relative">
+      <div className="absolute top-4 right-4">
+        <LanguageSelector />
+      </div>
       <div className="max-w-md w-full bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl p-8 space-y-6">
         <div className="text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-lime-400 mb-2">PronunCheck</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-lime-400 mb-2">{t('app.title')}</h2>
           <p className="text-gray-400">
             {isLogin 
-              ? `Đăng nhập (${targetRole === 'teacher' ? 'Giáo viên' : 'Học sinh'})` 
-              : `Tạo tài khoản (${targetRole === 'teacher' ? 'Giáo viên' : 'Học sinh'})`}
+              ? `${t('auth.login')} (${roleText})` 
+              : `${t('auth.register')} (${roleText})`}
           </p>
         </div>
         
@@ -67,7 +75,7 @@ function LoginContent() {
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">{t('auth.email')}</label>
             <input 
               type="email" 
               required 
@@ -77,7 +85,7 @@ function LoginContent() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Mật khẩu</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">{t('auth.password')}</label>
             <input 
               type="password" 
               required 
@@ -91,7 +99,7 @@ function LoginContent() {
             disabled={loading}
             className="w-full py-3.5 px-4 bg-lime-400 hover:bg-lime-500 active:bg-lime-600 text-gray-950 font-bold rounded-xl transition-all shadow-lg hover:shadow-lime-400/20 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
           >
-            {loading ? 'Đang xử lý...' : (isLogin ? 'Đăng nhập' : 'Đăng ký')}
+            {loading ? t('auth.processing') : (isLogin ? t('auth.login') : t('auth.register'))}
           </button>
         </form>
 
