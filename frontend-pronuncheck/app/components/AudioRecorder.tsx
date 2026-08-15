@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Mic, Square, Play, RotateCcw, Send } from 'lucide-react';
+import { Mic, Square, Play, RotateCcw, Send, Upload } from 'lucide-react';
 
 interface AudioRecorderProps {
   onAudioReady: (blob: Blob) => void;
@@ -15,6 +15,21 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        alert('File quá lớn. Vui lòng chọn file nhỏ hơn 10MB.');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+      setRecordedBlob(file);
+      setAudioUrl(URL.createObjectURL(file));
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const startRecording = async () => {
     try {
@@ -75,6 +90,9 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
   const resetRecording = () => {
     setRecordedBlob(null);
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
     setAudioUrl(null);
   };
 
@@ -88,18 +106,36 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
   return (
     <div className="flex flex-col items-center gap-4 p-4 bg-gray-800 rounded-xl border border-gray-700">
       {!isRecording && !recordedBlob && (
-        <button
-          type="button"
-          onClick={startRecording}
-          disabled={disabled}
-          className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all ${
-            disabled
-              ? 'bg-gray-600 cursor-not-allowed opacity-50'
-              : 'bg-red-500 hover:bg-red-600 hover:scale-105'
-          }`}
-        >
-          <Mic className="w-5 h-5" /> Bắt đầu ghi âm
-        </button>
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <button
+            type="button"
+            onClick={startRecording}
+            disabled={disabled}
+            className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all ${
+              disabled
+                ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                : 'bg-red-500 hover:bg-red-600 hover:scale-105'
+            }`}
+          >
+            <Mic className="w-5 h-5" /> Bắt đầu ghi âm
+          </button>
+
+          <span className="text-gray-400 font-medium">hoặc</span>
+
+          <label className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all cursor-pointer ${
+            disabled ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-blue-500 hover:bg-blue-600 hover:scale-105'
+          }`}>
+            <Upload className="w-5 h-5" /> Tải file lên
+            <input 
+              type="file" 
+              accept="audio/*" 
+              className="hidden" 
+              onChange={handleFileUpload} 
+              disabled={disabled}
+              ref={fileInputRef}
+            />
+          </label>
+        </div>
       )}
 
       {isRecording && (
