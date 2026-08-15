@@ -1,0 +1,128 @@
+'use client';
+
+import React, { useState, useRef } from 'react';
+import { Mic, Square, Play, RotateCcw, Send } from 'lucide-react';
+
+interface AudioRecorderProps {
+  onAudioReady: (blob: Blob) => void;
+  disabled?: boolean;
+}
+
+export default function AudioRecorder({ onAudioReady, disabled = false }: AudioRecorderProps) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setRecordedBlob(blob);
+        setAudioUrl(URL.createObjectURL(blob));
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      setRecordedBlob(null);
+      setAudioUrl(null);
+    } catch (err) {
+      console.error(err);
+      alert('Không thể truy cập Microphone. Vui lòng cấp quyền micro cho trình duyệt.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      setIsRecording(false);
+    }
+  };
+
+  const resetRecording = () => {
+    setRecordedBlob(null);
+    setAudioUrl(null);
+  };
+
+  const handleSubmit = () => {
+    if (recordedBlob) {
+      onAudioReady(recordedBlob);
+      resetRecording();
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-4 p-4 bg-gray-800 rounded-xl border border-gray-700">
+      {!isRecording && !recordedBlob && (
+        <button
+          type="button"
+          onClick={startRecording}
+          disabled={disabled}
+          className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all ${
+            disabled
+              ? 'bg-gray-600 cursor-not-allowed opacity-50'
+              : 'bg-red-500 hover:bg-red-600 hover:scale-105'
+          }`}
+        >
+          <Mic className="w-5 h-5" /> Bắt đầu ghi âm
+        </button>
+      )}
+
+      {isRecording && (
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2 text-red-400 font-semibold animate-pulse">
+            <span className="w-3 h-3 bg-red-500 rounded-full animate-ping"></span>
+            Đang ghi âm...
+          </div>
+          <button
+            type="button"
+            onClick={stopRecording}
+            className="flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white bg-gray-700 hover:bg-gray-600 transition-all border border-gray-600"
+          >
+            <Square className="w-5 h-5 text-red-400 fill-current" /> Dừng ghi âm
+          </button>
+        </div>
+      )}
+
+      {recordedBlob && audioUrl && (
+        <div className="flex flex-col items-center gap-4 w-full">
+          <audio src={audioUrl} controls className="w-full max-w-sm rounded-lg" />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={resetRecording}
+              disabled={disabled}
+              className="flex items-center gap-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors"
+            >
+              <RotateCcw className="w-4 h-4" /> Ghi âm lại
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={disabled}
+              className="flex items-center gap-1 px-6 py-2 bg-lime-500 hover:bg-lime-600 text-gray-900 font-bold rounded-lg text-sm shadow-md transition-colors"
+            >
+              <Send className="w-4 h-4" /> Chấm điểm ngay
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

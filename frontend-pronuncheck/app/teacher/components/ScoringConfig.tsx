@@ -56,7 +56,7 @@ export default function ScoringConfigComponent({ classId, initialConfig }: Scori
             onChange={e => setConfig({ ...config, threshold: Number(e.target.value) })}
             className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
-          <p className="text-xs text-gray-500 mt-2">Điểm Hybrid >= {(config.threshold * 100).toFixed(0)}% sẽ được tính là Đạt.</p>
+          <p className="text-xs text-gray-500 mt-2">Điểm Hybrid &gt;= {(config.threshold * 100).toFixed(0)}% sẽ được tính là Đạt.</p>
         </div>
 
         <div>

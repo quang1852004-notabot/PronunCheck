@@ -19,3 +19,7 @@ test/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# SSH Keys
+github_deploy_key*
+

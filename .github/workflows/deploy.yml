@@ -1,0 +1,30 @@
+name: Auto Deploy to GCP VM
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VM via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "--- Dang cap nhat code tu Git ---"
+            # Tu dong tim thu muc PronunCheck hoac DT3_PronunCheck tren VM
+            if [ -d "~/DT3_PronunCheck" ]; then
+              cd ~/DT3_PronunCheck
+            elif [ -d "~/PronunCheck" ]; then
+              cd ~/PronunCheck
+            else
+              echo "Khong tim thay thu muc repo tren VM!"
+              exit 1
+            fi
+            
+            git pull origin main
+            echo "--- Cap nhat thanh cong! ---"

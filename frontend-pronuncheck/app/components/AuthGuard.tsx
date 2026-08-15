@@ -4,15 +4,19 @@ import React, { useEffect } from 'react';
 import { useAuth } from '@/app/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 
-export default function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+export default function AuthGuard({ children, allowedRole }: { children: React.ReactNode; allowedRole?: string }) {
+  const { user, userRole, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login');
+    if (!loading) {
+      if (!user) {
+        router.push('/login');
+      } else if (allowedRole && userRole && userRole !== allowedRole) {
+        router.push(userRole === 'teacher' ? '/teacher' : '/student');
+      }
     }
-  }, [user, loading, router]);
+  }, [user, userRole, loading, router, allowedRole]);
 
   if (loading) {
     return (

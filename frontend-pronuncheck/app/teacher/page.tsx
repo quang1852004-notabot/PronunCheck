@@ -256,8 +256,7 @@ function SubmissionsView({ task, goBack }: { task: any, goBack: () => void }) {
     const q = query(collection(db, 'submissions'), where('taskId', '==', task.id));
     const snap = await getDocs(q);
     const subs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    // Sort by timestamp desc
-    subs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    subs.sort((a: any, b: any) => new Date(b.timestamp || b.createdAt || 0).getTime() - new Date(a.timestamp || a.createdAt || 0).getTime());
     setSubmissions(subs);
   };
 
