@@ -141,19 +141,22 @@ function ClassPageContent({ classId }: { classId: string }) {
         word: expectedWord,
         audioStoragePath: storagePath,
         detailedScore: {
-          wav2vec_raw_score: data.wav2vec_raw_score || 0,
-          whisper_raw_score: data.whisper_raw_score || 0,
-          hybrid_target_score: data.hybrid_target_score || 0,
-          is_passed: data.is_passed,
-          feedback: data.feedback
+          wav2vec_raw_score: data.assessment.precise_score || 0,
+          whisper_raw_score: data.assessment.whisper_score || 0,
+          dtw_score: data.assessment.dtw_score || 0,
+          fluent_score: data.assessment.fluent_score || 0,
+          hybrid_target_score: data.assessment.hybrid_target_score || 0,
+          is_passed: data.assessment.is_passed,
+          feedback: data.assessment.feedback,
+          char_scores: data.char_scores || []
         },
-        isPassed: data.is_passed,
+        isPassed: data.assessment.is_passed,
         attemptNumber
       });
 
       setAssessmentResult({
-        passed: data.is_passed,
-        feedback: data.feedback,
+        passed: data.assessment.is_passed,
+        feedback: data.assessment.feedback,
       });
 
       // Update local state
@@ -162,7 +165,7 @@ function ClassPageContent({ classId }: { classId: string }) {
           return {
             ...a,
             attemptsUsed: attemptNumber,
-            isPassed: a.isPassed || data.is_passed
+            isPassed: a.isPassed || data.assessment.is_passed
           };
         }
         return a;

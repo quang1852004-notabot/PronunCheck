@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/app/contexts/AuthContext";
 import { LanguageProvider } from "@/app/contexts/LanguageContext";
+import Pwa from "@/app/Pwa";
 
 // Tat static prerendering - Firebase can browser APIs nen khong the chay server-side
 export const dynamic = "force-dynamic";
@@ -17,9 +18,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#4CAF50",
+};
+
 export const metadata: Metadata = {
   title: "PronunCheck - Luyen Phat Am",
   description: "Ung dung kiem tra phat am tieng Duc cho hoc sinh",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -30,7 +36,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-full flex flex-col">
         <LanguageProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <Pwa />
+            {children}
+          </AuthProvider>
         </LanguageProvider>
       </body>
     </html>

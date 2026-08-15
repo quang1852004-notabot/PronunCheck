@@ -79,13 +79,13 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                     {sub.attemptNumber} / {assignments.find(a => a.id === sub.assignmentId)?.maxAttempts || '?'}
                   </td>
                   <td className="px-6 py-4 text-center">
-                    {(sub.detailedScore.wav2vec_raw_score * 100).toFixed(1)}%
+                    {(sub.detailedScore.wav2vec_raw_score > 1 ? sub.detailedScore.wav2vec_raw_score : sub.detailedScore.wav2vec_raw_score * 100).toFixed(1)}%
                   </td>
                   <td className="px-6 py-4 text-center">
-                    {(sub.detailedScore.whisper_raw_score * 100).toFixed(1)}%
+                    {(sub.detailedScore.whisper_raw_score > 1 ? sub.detailedScore.whisper_raw_score : sub.detailedScore.whisper_raw_score * 100).toFixed(1)}%
                   </td>
                   <td className="px-6 py-4 text-center font-bold text-white">
-                    {(sub.detailedScore.hybrid_target_score * 100).toFixed(1)}%
+                    {(sub.detailedScore.hybrid_target_score > 1 ? sub.detailedScore.hybrid_target_score : sub.detailedScore.hybrid_target_score * 100).toFixed(1)}%
                   </td>
                   <td className="px-6 py-4 text-center">
                     <span className={`px-2 py-1 rounded text-xs font-bold ${

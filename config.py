@@ -71,5 +71,6 @@ WAV2VEC_MODEL_NAME = "facebook/wav2vec2-large-xlsr-53-german"
 # 4. CẤU HÌNH LƯU TRỮ VÀ TẢI FILE
 # ==============================================================================
 UPLOAD_DIR = "temp_audio"
+REFERENCE_AUDIO_DIR = "reference_audio"
 MAX_FILE_SIZE_MB = 10
 ALLOWED_EXTENSIONS = {"wav", "webm", "mp3", "ogg"}

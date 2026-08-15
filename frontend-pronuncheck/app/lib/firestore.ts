@@ -8,7 +8,8 @@ import {
   updateDoc, 
   query, 
   where, 
-  serverTimestamp 
+  serverTimestamp,
+  setDoc
 } from 'firebase/firestore';
 
 export interface ScoringConfig {
@@ -45,6 +46,9 @@ export interface DetailedScore {
   hybrid_target_score: number;
   is_passed: boolean;
   feedback: string;
+  dtw_score?: number;
+  fluent_score?: number;
+  char_scores?: any[];
 }
 
 export interface SubmissionData {
@@ -133,4 +137,59 @@ export async function createSubmission(classId: string, submission: Omit<Submiss
     createdAt: serverTimestamp()
   });
   return ref.id;
+}
+export async function getClassesByTeacher(teacherId: string): Promise<ClassData[]> {
+  const q = query(collection(db, 'classes'), where('teacherId', '==', teacherId));
+  const snap = await getDocs(q);
+  return snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  } as ClassData));
+}
+
+export async function createClass(classData: Omit<ClassData, 'id'>, customId?: string): Promise<string> {
+  if (customId) {
+    await setDoc(doc(db, 'classes', customId), {
+      ...classData,
+      createdAt: serverTimestamp()
+    });
+    return customId;
+  } else {
+    const ref = await addDoc(collection(db, 'classes'), {
+      ...classData,
+      createdAt: serverTimestamp()
+    });
+    return ref.id;
+  }
+}
+
+export async function deleteClass(classId: string): Promise<void> {
+  const { deleteDoc, doc } = await import('firebase/firestore');
+  await deleteDoc(doc(db, 'classes', classId));
+}
+
+export async function joinClass(classId: string, studentId: string, studentEmail: string): Promise<void> {
+  await setDoc(doc(db, 'class_members', `${classId}_${studentId}`), {
+    classId,
+    studentId,
+    studentEmail,
+    joinedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+export async function getJoinedClasses(studentId: string): Promise<(ClassData & { joinedAt?: any })[]> {
+  const q = query(collection(db, 'class_members'), where('studentId', '==', studentId));
+  const snap = await getDocs(q);
+  
+  const classPromises = snap.docs.map(async (d) => {
+    const data = d.data();
+    const classData = await getClass(data.classId);
+    if (classData) {
+      return { ...classData, joinedAt: data.joinedAt };
+    }
+    return null;
+  });
+  
+  const classes = (await Promise.all(classPromises)).filter(c => c !== null) as (ClassData & { joinedAt?: any })[];
+  return classes;
 }

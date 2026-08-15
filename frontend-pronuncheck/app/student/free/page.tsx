@@ -39,8 +39,8 @@ export default function FreeModePage() {
 
       const data = await res.json();
       setResult({
-        passed: data.is_passed,
-        feedback: data.feedback,
+        passed: data.assessment.is_passed,
+        feedback: data.assessment.feedback,
       });
     } catch (error) {
       console.error(error);
