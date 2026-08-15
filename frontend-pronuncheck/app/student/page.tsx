@@ -396,7 +396,24 @@ function ClassModeView({ user }: { user: any }) {
       const q = query(collection(db, 'tasks'), where('classId', '==', cls.id));
       const querySnapshot = await getDocs(q);
       const t = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setTasks(t);
+
+      // Fetch submissions for this student in this class
+      const subsQ = query(collection(db, 'submissions'), where('classId', '==', cls.id), where('studentId', '==', user.uid));
+      const subsSnap = await getDocs(subsQ);
+      const subs = subsSnap.docs.map(d => d.data());
+
+      // Attach attempts count to tasks
+      const tasksWithAttempts = t.map(task => {
+        const studentSubs = subs.filter((s: any) => s.taskId === task.id);
+        const isPassed = studentSubs.some((s: any) => s.scores?.is_passed);
+        return {
+          ...task,
+          attemptsUsed: studentSubs.length,
+          isPassed
+        };
+      });
+
+      setTasks(tasksWithAttempts);
     } catch(err) {
       console.error(err);
     } finally {
@@ -493,6 +510,19 @@ function ClassModeView({ user }: { user: any }) {
         timestamp: new Date().toISOString()
       });
 
+      setSelectedTask((prev: any) => ({
+        ...prev, 
+        attemptsUsed: (prev.attemptsUsed || 0) + 1, 
+        isPassed: data.assessment.is_passed || prev.isPassed 
+      }));
+      setTasks(prev => prev.map(t => 
+        t.id === task.id ? {
+          ...t, 
+          attemptsUsed: (t.attemptsUsed || 0) + 1, 
+          isPassed: data.assessment.is_passed || t.isPassed
+        } : t
+      ));
+
       setResult({ is_passed: data.assessment.is_passed, feedback: data.assessment.feedback });
     } catch (error) {
       alert('Lỗi khi chấm bài. Vui lòng thử lại.');
@@ -566,6 +596,8 @@ function ClassModeView({ user }: { user: any }) {
   }
 
   if (viewMode === 'task' && selectedTask) {
+    const isLimitReached = selectedTask.attemptsUsed >= (selectedTask.maxAttempts || 3);
+    
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-3xl p-6 md:p-10 mx-auto max-w-xl">
         <button onClick={() => { setViewMode('inside_class'); setSelectedTask(null); setResult(null); setRecordedBlob(null); setPreviewAudioUrl(null); }} className="text-gray-400 hover:text-white mb-6 flex items-center gap-2">
@@ -575,58 +607,71 @@ function ClassModeView({ user }: { user: any }) {
         <div className="text-center mb-8">
           <h2 className="text-2xl font-bold text-blue-400 mb-2">Bài tập: Phát âm vần "{selectedTask.targetPhoneme}"</h2>
           <p className="text-gray-400">Hãy đọc từ: <strong className="text-white text-xl ml-2">{selectedTask.word}</strong></p>
+          <p className={`text-sm mt-2 ${isLimitReached ? 'text-red-400 font-bold' : 'text-gray-400'}`}>
+            Đã nộp: {selectedTask.attemptsUsed}/{selectedTask.maxAttempts || 3} lần
+          </p>
         </div>
 
-        <div className="space-y-4">
-          {!isRecording && !recordedBlob && (
-            <button onClick={startRecording} disabled={isAssessing} className="w-full py-4 px-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-              <Mic className="w-5 h-5" />
-              {isAssessing ? 'Đang nộp và chấm điểm...' : 'Bắt đầu ghi âm'}
-            </button>
-          )}
-          
-          {isRecording && (
-            <button onClick={stopRecording} className="w-full py-4 px-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-all animate-pulse flex items-center justify-center gap-2">
-              Dừng ghi âm
-            </button>
-          )}
+        {isLimitReached && !selectedTask.isPassed ? (
+          <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl text-center text-red-400 font-medium">
+            Bạn đã hết lượt nộp bài cho bài tập này.
+          </div>
+        ) : selectedTask.isPassed && !result ? (
+          <div className="bg-green-500/10 border border-green-500/30 p-4 rounded-xl text-center text-green-400 font-medium">
+            Bạn đã hoàn thành bài tập này! ✅
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {!isRecording && !recordedBlob && (
+              <button onClick={startRecording} disabled={isAssessing} className="w-full py-4 px-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                <Mic className="w-5 h-5" />
+                {isAssessing ? 'Đang nộp và chấm điểm...' : 'Bắt đầu ghi âm'}
+              </button>
+            )}
+            
+            {isRecording && (
+              <button onClick={stopRecording} className="w-full py-4 px-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-all animate-pulse flex items-center justify-center gap-2">
+                Dừng ghi âm
+              </button>
+            )}
 
-          {recordedBlob && previewAudioUrl && !isAssessing && !result && (
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 space-y-4">
-              <p className="text-center text-gray-300 font-medium">Nghe lại bản thu của bạn:</p>
-              <audio src={previewAudioUrl} controls className="w-full" />
-              <div className="flex gap-3 mt-4">
-                <button onClick={cancelRecording} className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors">
-                  Thu âm lại
-                </button>
-                <button onClick={submitRecording} className="flex-1 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition-colors">
-                  Nộp bài
-                </button>
+            {recordedBlob && previewAudioUrl && !isAssessing && !result && (
+              <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 space-y-4">
+                <p className="text-center text-gray-300 font-medium">Nghe lại bản thu của bạn:</p>
+                <audio src={previewAudioUrl} controls className="w-full" />
+                <div className="flex gap-3 mt-4">
+                  <button onClick={cancelRecording} className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition-colors">
+                    Thu âm lại
+                  </button>
+                  <button onClick={submitRecording} className="flex-1 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition-colors">
+                    Nộp bài
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {isAssessing && (
-             <div className="w-full py-4 px-4 bg-gray-700 text-gray-300 font-bold rounded-xl flex items-center justify-center">
-               Đang nộp và chấm điểm...
-             </div>
-          )}
-          
-          {!recordedBlob && !isRecording && !isAssessing && (
-            <>
-              <div className="relative flex items-center justify-center">
-                 <span className="bg-gray-800 px-3 text-sm text-gray-500 z-10">hoặc</span>
-                 <div className="absolute w-full h-px bg-gray-700"></div>
-              </div>
-              
-              <label className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-xl cursor-pointer flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
-                <Upload className="w-5 h-5" />
-                Tải file âm thanh (.wav, .mp3, .webm)
-                <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} disabled={isAssessing || isRecording} />
-              </label>
-            </>
-          )}
-        </div>
+            {isAssessing && (
+               <div className="w-full py-4 px-4 bg-gray-700 text-gray-300 font-bold rounded-xl flex items-center justify-center">
+                 Đang nộp và chấm điểm...
+               </div>
+            )}
+            
+            {!recordedBlob && !isRecording && !isAssessing && (
+              <>
+                <div className="relative flex items-center justify-center">
+                   <span className="bg-gray-800 px-3 text-sm text-gray-500 z-10">hoặc</span>
+                   <div className="absolute w-full h-px bg-gray-700"></div>
+                </div>
+                
+                <label className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-xl cursor-pointer flex items-center justify-center gap-2 transition-colors disabled:opacity-50">
+                  <Upload className="w-5 h-5" />
+                  Tải file âm thanh (.wav, .mp3, .webm)
+                  <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} disabled={isAssessing || isRecording} />
+                </label>
+              </>
+            )}
+          </div>
+        )}
 
         {result && (
           <div className={`mt-8 p-6 border rounded-2xl text-center space-y-3 ${result.is_passed ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
@@ -640,9 +685,11 @@ function ClassModeView({ user }: { user: any }) {
             </h3>
             <p className="text-gray-300">{result.feedback}</p>
             <p className="text-sm text-blue-300 mt-4">Kết quả và bản thu âm đã được gửi cho Giáo viên.</p>
-            <button onClick={() => { setResult(null); setRecordedBlob(null); setPreviewAudioUrl(null); }} className="mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-white transition-colors">
-              Làm lại
-            </button>
+            {!isLimitReached && !result.is_passed && (
+              <button onClick={() => { setResult(null); setRecordedBlob(null); setPreviewAudioUrl(null); }} className="mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm text-white transition-colors">
+                Làm lại
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -670,11 +717,20 @@ function ClassModeView({ user }: { user: any }) {
             <div key={task.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex justify-between items-center hover:border-blue-500/50 transition-colors">
               <div>
                 <h4 className="font-bold text-lg text-white">Từ: {task.word}</h4>
-                <p className="text-sm text-gray-400">Âm mục tiêu: {task.targetPhoneme}</p>
-                {task.deadline && <p className="text-xs text-red-400 mt-1">Hạn: {new Date(task.deadline).toLocaleString()}</p>}
+                <div className="text-sm text-gray-400 mt-1 flex gap-3 flex-wrap">
+                  <span>Âm mục tiêu: {task.targetPhoneme}</span>
+                  <span className={task.attemptsUsed >= (task.maxAttempts || 3) ? 'text-red-400' : ''}>
+                    Lượt nộp: {task.attemptsUsed}/{task.maxAttempts || 3}
+                  </span>
+                  {task.deadline ? <span className="text-amber-400">Hạn: {new Date(task.deadline).toLocaleString()}</span> : <span className="text-green-400">Vô thời hạn</span>}
+                </div>
+                {task.isPassed && <div className="text-xs text-green-400 font-bold mt-2">ĐÃ ĐẠT ✅</div>}
               </div>
-              <button onClick={() => { setSelectedTask(task); setViewMode('task'); setResult(null); setRecordedBlob(null); setPreviewAudioUrl(null); }} className="px-4 py-2 bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white rounded-lg font-medium transition-all">
-                Làm bài
+              <button 
+                onClick={() => { setSelectedTask(task); setViewMode('task'); setResult(null); setRecordedBlob(null); setPreviewAudioUrl(null); }} 
+                className="px-4 py-2 bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white rounded-lg font-medium transition-all"
+              >
+                {task.attemptsUsed >= (task.maxAttempts || 3) || task.isPassed ? 'Xem bài' : 'Làm bài'}
               </button>
             </div>
           ))}

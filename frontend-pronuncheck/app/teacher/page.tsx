@@ -7,7 +7,7 @@ import AuthGuard from '@/app/components/AuthGuard';
 import { LanguageSelector } from '@/app/components/LanguageSelector';
 import { useRouter } from 'next/navigation';
 import { db } from '@/app/firebase';
-import { collection, query, where, getDocs, doc, setDoc, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, addDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { LogOut, Plus, Trash2, Users, FileText, ArrowLeft, Play, Settings } from 'lucide-react';
 
 function generateClassId() {
@@ -171,6 +171,8 @@ function ClassDetailsView({ cls }: { cls: any }) {
 function TasksTab({ classId }: { classId: string }) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [isNoDeadline, setIsNoDeadline] = useState(true);
   const [selectedTaskForSubmissions, setSelectedTaskForSubmissions] = useState<any>(null);
 
   useEffect(() => { loadTasks(); }, [classId]);
@@ -181,21 +183,52 @@ function TasksTab({ classId }: { classId: string }) {
     setTasks(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
   };
 
-  const createTask = async (e: React.FormEvent) => {
+  const openCreateForm = () => {
+    setEditingTask(null);
+    setIsNoDeadline(true);
+    setShowCreate(true);
+  };
+
+  const openEditForm = (task: any) => {
+    setEditingTask(task);
+    setIsNoDeadline(!task.deadline);
+    setShowCreate(true);
+  };
+
+  const saveTask = async (e: React.FormEvent) => {
     e.preventDefault();
     const t = e.target as any;
-    await addDoc(collection(db, 'tasks'), {
+    
+    const taskData = {
       classId,
       word: t.word.value,
       targetPhoneme: t.phoneme.value,
-      deadline: t.deadline.value || null,
+      deadline: isNoDeadline ? null : (t.deadline.value || null),
       w1: parseFloat(t.w1.value) || 0.4,
       w2: parseFloat(t.w2.value) || 0.6,
       threshold: parseFloat(t.threshold.value) || 0.55,
-      createdAt: new Date().toISOString()
-    });
+      maxAttempts: parseInt(t.maxAttempts.value) || 3,
+    };
+
+    if (editingTask) {
+      await updateDoc(doc(db, 'tasks', editingTask.id), taskData);
+    } else {
+      await addDoc(collection(db, 'tasks'), {
+        ...taskData,
+        createdAt: new Date().toISOString()
+      });
+    }
+
     setShowCreate(false);
+    setEditingTask(null);
     loadTasks();
+  };
+
+  const deleteTask = async (id: string) => {
+    if (confirm("Bạn có chắc chắn muốn xóa bài tập này?")) {
+      await deleteDoc(doc(db, 'tasks', id));
+      loadTasks();
+    }
   };
   
   if (selectedTaskForSubmissions) {
@@ -206,23 +239,49 @@ function TasksTab({ classId }: { classId: string }) {
     <div>
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-bold">Danh sách Bài tập</h3>
-        <button onClick={() => setShowCreate(!showCreate)} className="bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1">
+        <button onClick={() => showCreate ? setShowCreate(false) : openCreateForm()} className="bg-blue-500 hover:bg-blue-600 px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1">
           {showCreate ? 'Hủy' : <><Plus className="w-4 h-4"/> Thêm bài tập</>}
         </button>
       </div>
 
       {showCreate && (
-        <form onSubmit={createTask} className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-6 grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2 text-blue-400 font-semibold mb-2 flex items-center gap-2"><Settings className="w-4 h-4"/> Cấu hình bài tập mới</div>
-          <div><label className="text-xs text-gray-400 block mb-1">Từ cần đọc *</label><input type="text" name="word" placeholder="VD: Schule" required className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none" /></div>
-          <div><label className="text-xs text-gray-400 block mb-1">Âm mục tiêu *</label><input type="text" name="phoneme" placeholder="VD: sch hoặc ʃ" required className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none" /></div>
-          <div><label className="text-xs text-gray-400 block mb-1">Hạn nộp (tùy chọn)</label><input type="datetime-local" name="deadline" className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none text-white" style={{colorScheme:'dark'}}/></div>
-          <div className="grid grid-cols-3 gap-2">
-            <div><label className="text-xs text-gray-400 block mb-1" title="Trọng số âm thanh thô (Mặc định 0.4)">w1 (Wav2Vec)</label><input type="number" step="0.1" name="w1" defaultValue="0.4" className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-center" /></div>
-            <div><label className="text-xs text-gray-400 block mb-1" title="Trọng số khớp từ (Mặc định 0.6)">w2 (Whisper)</label><input type="number" step="0.1" name="w2" defaultValue="0.6" className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-center" /></div>
-            <div><label className="text-xs text-gray-400 block mb-1" title="Điểm tối thiểu để ĐẠT (Mặc định 0.55)">Ngưỡng (Độ khó)</label><input type="number" step="0.05" name="threshold" defaultValue="0.55" className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-center" /></div>
+        <form onSubmit={saveTask} className="bg-gray-900 border border-gray-700 rounded-xl p-4 mb-6 grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2 text-blue-400 font-semibold mb-2 flex items-center gap-2">
+            <Settings className="w-4 h-4"/> {editingTask ? 'Chỉnh sửa bài tập' : 'Cấu hình bài tập mới'}
           </div>
-          <div className="sm:col-span-2 mt-2"><button type="submit" className="w-full bg-blue-500 hover:bg-blue-600 py-2 rounded-lg font-bold">Lưu bài tập</button></div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Từ cần đọc *</label>
+            <input type="text" name="word" defaultValue={editingTask?.word} placeholder="VD: Schule" required className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Âm mục tiêu *</label>
+            <input type="text" name="phoneme" defaultValue={editingTask?.targetPhoneme} placeholder="VD: sch hoặc ʃ" required className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none" />
+          </div>
+          
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">
+              Hạn nộp
+              <label className="ml-4 inline-flex items-center text-xs text-gray-300 cursor-pointer">
+                <input type="checkbox" checked={isNoDeadline} onChange={e => setIsNoDeadline(e.target.checked)} className="mr-1" /> Vô thời hạn
+              </label>
+            </label>
+            <input type="datetime-local" name="deadline" disabled={isNoDeadline} defaultValue={editingTask?.deadline ? new Date(editingTask.deadline).toISOString().slice(0, 16) : ''} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none text-white disabled:opacity-50" style={{colorScheme:'dark'}}/>
+          </div>
+
+          <div>
+             <label className="text-xs text-gray-400 block mb-1">Số lần nộp tối đa</label>
+             <input type="number" name="maxAttempts" min="1" defaultValue={editingTask?.maxAttempts || 3} required className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-400 focus:outline-none" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 sm:col-span-2">
+            <div><label className="text-xs text-gray-400 block mb-1" title="Trọng số âm thanh thô (Mặc định 0.4)">w1 (Wav2Vec)</label><input type="number" step="0.1" name="w1" defaultValue={editingTask?.w1 ?? 0.4} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-center" /></div>
+            <div><label className="text-xs text-gray-400 block mb-1" title="Trọng số khớp từ (Mặc định 0.6)">w2 (Whisper)</label><input type="number" step="0.1" name="w2" defaultValue={editingTask?.w2 ?? 0.6} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-center" /></div>
+            <div><label className="text-xs text-gray-400 block mb-1" title="Điểm tối thiểu để ĐẠT (Mặc định 0.55)">Ngưỡng (Độ khó)</label><input type="number" step="0.05" name="threshold" defaultValue={editingTask?.threshold ?? 0.55} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-center" /></div>
+          </div>
+          <div className="sm:col-span-2 mt-2 flex gap-3">
+            <button type="submit" className="flex-1 bg-blue-500 hover:bg-blue-600 py-2 rounded-lg font-bold">{editingTask ? 'Cập nhật' : 'Lưu bài tập'}</button>
+            <button type="button" onClick={() => setShowCreate(false)} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold">Hủy</button>
+          </div>
         </form>
       )}
 
@@ -231,18 +290,21 @@ function TasksTab({ classId }: { classId: string }) {
       ) : (
         <div className="space-y-3">
           {tasks.map(task => (
-            <div key={task.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div key={task.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
               <div>
                 <h4 className="font-bold text-lg">{task.word} <span className="text-sm font-normal text-gray-400 ml-2">/ {task.targetPhoneme} /</span></h4>
-                <div className="text-xs text-gray-500 mt-1 flex gap-3">
+                <div className="text-xs text-gray-500 mt-1 flex gap-3 flex-wrap">
                   <span>Khó: {task.threshold}</span>
                   <span>w1: {task.w1} | w2: {task.w2}</span>
-                  {task.deadline && <span className="text-amber-400">Hạn: {new Date(task.deadline).toLocaleString()}</span>}
+                  <span>Lượt nộp: {task.maxAttempts || 3}</span>
+                  {task.deadline ? <span className="text-amber-400">Hạn: {new Date(task.deadline).toLocaleString()}</span> : <span className="text-green-400">Vô thời hạn</span>}
                 </div>
               </div>
-              <button onClick={() => setSelectedTaskForSubmissions(task)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm text-white transition-colors">
-                Xem bài nộp
-              </button>
+              <div className="flex items-center gap-2 mt-3 md:mt-0">
+                <button onClick={() => openEditForm(task)} className="px-3 py-2 bg-gray-800 hover:bg-blue-900 border border-gray-600 hover:border-blue-500 text-blue-400 rounded-lg text-sm transition-colors">Sửa</button>
+                <button onClick={() => deleteTask(task.id)} className="px-3 py-2 bg-gray-800 hover:bg-red-900 border border-gray-600 hover:border-red-500 text-red-400 rounded-lg text-sm transition-colors">Xóa</button>
+                <button onClick={() => setSelectedTaskForSubmissions(task)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm text-white transition-colors">Xem bài nộp</button>
+              </div>
             </div>
           ))}
         </div>
@@ -260,7 +322,19 @@ function SubmissionsView({ task, goBack }: { task: any, goBack: () => void }) {
     const q = query(collection(db, 'submissions'), where('taskId', '==', task.id));
     const snap = await getDocs(q);
     const subs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    // Sort oldest to newest to assign attempt numbers
+    subs.sort((a: any, b: any) => new Date(a.timestamp || a.createdAt || 0).getTime() - new Date(b.timestamp || b.createdAt || 0).getTime());
+    
+    const studentAttempts: Record<string, number> = {};
+    for (const sub of subs) {
+      studentAttempts[sub.studentId] = (studentAttempts[sub.studentId] || 0) + 1;
+      sub.attemptNumber = studentAttempts[sub.studentId];
+    }
+
+    // Now sort newest to oldest for display
     subs.sort((a: any, b: any) => new Date(b.timestamp || b.createdAt || 0).getTime() - new Date(a.timestamp || a.createdAt || 0).getTime());
+    
     setSubmissions(subs);
   };
 
@@ -281,7 +355,9 @@ function SubmissionsView({ task, goBack }: { task: any, goBack: () => void }) {
               <div key={sub.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                   <p className="font-semibold">{sub.studentEmail}</p>
-                  <p className="text-xs text-gray-500">{new Date(sub.timestamp).toLocaleString()}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {new Date(sub.timestamp).toLocaleString()} • <strong className="text-gray-300">Lần {sub.attemptNumber}/{task.maxAttempts || 3}</strong>
+                  </p>
                 </div>
                 
                 <div className="flex flex-col sm:flex-row gap-4 items-center">
