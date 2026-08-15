@@ -20,22 +20,40 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      
+      // Xác định định dạng hỗ trợ tốt nhất cho trình duyệt (Chrome vs Safari/iOS)
+      let options = {};
+      let mimeType = '';
+      if (typeof MediaRecorder.isTypeSupported === 'function') {
+        const types = ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/aac'];
+        for (const t of types) {
+          if (MediaRecorder.isTypeSupported(t)) {
+            options = { mimeType: t };
+            mimeType = t;
+            break;
+          }
+        }
+      }
+
+      const recorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
-      mediaRecorderRef.current.ondataavailable = (e) => {
+      recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
       };
 
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      recorder.onstop = () => {
+        // Sử dụng đúng mimeType đã record thay vì hardcode audio/webm
+        const blobType = mimeType || recorder.mimeType || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: blobType });
         setRecordedBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
       };
 
-      mediaRecorderRef.current.start();
+      recorder.start();
       setIsRecording(true);
       setRecordedBlob(null);
       setAudioUrl(null);

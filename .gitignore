@@ -26,3 +26,6 @@ github_deploy_key*
 # Secrets and Caches
 google_key.json
 reference_audio/
+
+# Internal context files
+roadmap.md  
