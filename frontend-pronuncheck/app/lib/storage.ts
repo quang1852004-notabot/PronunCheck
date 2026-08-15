@@ -7,7 +7,14 @@ export async function uploadAudio(
   studentId: string,
   audioBlob: Blob
 ): Promise<string> {
-  const path = `classes/${classId}/assignments/${assignmentId}/${studentId}_${Date.now()}.webm`;
+  let extension = 'webm';
+  if (audioBlob instanceof File) {
+    const parts = audioBlob.name.split('.');
+    if (parts.length > 1) {
+      extension = parts.pop() || 'webm';
+    }
+  }
+  const path = `classes/${classId}/assignments/${assignmentId}/${studentId}_${Date.now()}.${extension}`;
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, audioBlob);
   return path;

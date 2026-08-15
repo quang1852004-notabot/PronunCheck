@@ -23,7 +23,8 @@ export default function FreeModePage() {
 
     try {
       const formData = new FormData();
-      formData.append('audio_file', blob, 'recording.webm');
+      const filename = blob instanceof File ? blob.name : 'recording.webm';
+      formData.append('audio_file', blob, filename);
       formData.append('expected_word', word.trim());
       formData.append('target_phoneme', 'auto');
 

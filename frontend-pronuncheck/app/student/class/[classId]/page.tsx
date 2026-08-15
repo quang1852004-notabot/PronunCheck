@@ -107,7 +107,8 @@ function ClassPageContent({ classId }: { classId: string }) {
       }
 
       const formData = new FormData();
-      formData.append('audio_file', blob, 'recording.webm');
+      const filename = blob instanceof File ? blob.name : 'recording.webm';
+      formData.append('audio_file', blob, filename);
       formData.append('expected_word', expectedWord);
       formData.append('target_phoneme', targetPhoneme);
       
