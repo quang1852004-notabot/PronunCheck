@@ -142,31 +142,19 @@ def analyze_with_whisperx(audio_array: np.ndarray, expected_word: str, whisper_m
             audio_array, 
             beam_size=5, 
             language="de", 
-            word_timestamps=True,
+            word_timestamps=False,
             initial_prompt=expected_word,
             condition_on_previous_text=False
         )
-        segments = list(segments_gen)
         
-        word_confidence = 0.0
-        found_in_text = False
+        expected_clean = expected_word.lower().strip()
         
-        for segment in segments:
-            if expected_word.lower() in segment.text.lower():
-                found_in_text = True
-                
-            if segment.words:
-                for word in segment.words:
-                    if expected_word.lower() in word.word.lower():
-                        word_confidence = word.probability
-                        break
-            if word_confidence > 0.0: break
+        for segment in segments_gen:
+            text_clean = segment.text.lower()
+            if expected_clean in text_clean:
+                return 1.0  # Hoàn toàn nghe ra từ đó
             
-        # Fallback for short audio where word_timestamps fails but text contains word
-        if word_confidence == 0.0 and found_in_text:
-            word_confidence = 0.85 # Heuristic fallback score
-            
-        return float(word_confidence)
+        return 0.0 # Không nghe ra từ mục tiêu
     except Exception as e:
         print(f"Whisper Exception: {e}", flush=True)
         return 0.5
