@@ -138,16 +138,38 @@ def calculate_dtw_score(user_audio: np.ndarray, expected_word: str):
 def analyze_with_whisperx(audio_array: np.ndarray, expected_word: str, whisper_model) -> float:
     if not whisper_model: return 0.5
     try:
-        segments, _ = whisper_model.transcribe(audio_array, beam_size=5, language="de", word_timestamps=True)
+        segments_gen, info = whisper_model.transcribe(
+            audio_array, 
+            beam_size=5, 
+            language="de", 
+            word_timestamps=True,
+            initial_prompt=expected_word,
+            condition_on_previous_text=False
+        )
+        segments = list(segments_gen)
+        
         word_confidence = 0.0
+        found_in_text = False
+        
         for segment in segments:
-            for word in segment.words:
-                if expected_word.lower() in word.word.lower():
-                    word_confidence = word.probability
-                    break
+            if expected_word.lower() in segment.text.lower():
+                found_in_text = True
+                
+            if segment.words:
+                for word in segment.words:
+                    if expected_word.lower() in word.word.lower():
+                        word_confidence = word.probability
+                        break
             if word_confidence > 0.0: break
+            
+        # Fallback for short audio where word_timestamps fails but text contains word
+        if word_confidence == 0.0 and found_in_text:
+            word_confidence = 0.85 # Heuristic fallback score
+            
         return float(word_confidence)
-    except: return 0.5
+    except Exception as e:
+        print(f"Whisper Exception: {e}", flush=True)
+        return 0.5
 
 def calculate_dynamic_score(precise_score, whisper_score, dtw_score, expected_word, worst_char_info):
     L = len(expected_word.replace(" ", ""))
