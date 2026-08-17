@@ -7,13 +7,52 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-v2.1-009688?logo=fastapi)
 ![Firebase](https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore%20%2B%20Storage-FFCA28?logo=firebase)
 ![PyTorch](https://img.shields.io/badge/PyTorch-Wav2Vec2-EE4C2C?logo=pytorch)
+![Vercel](https://img.shields.io/badge/Frontend-Vercel-black?logo=vercel)
+![GCP](https://img.shields.io/badge/Backend-GCP%20VM-4285F4?logo=googlecloud)
+
+---
+
+## 🏗️ Kiến trúc Triển khai (Deployment Architecture)
+
+Dự án tách biệt hoàn toàn giữa **Frontend (Serverless)** và **Backend (AI Compute Engine)** nhằm tối ưu chi phí và hiệu năng:
+
+```
+                          [ Người Dùng (Học sinh / Giáo viên) ]
+                                            │
+                   ┌────────────────────────┴────────────────────────┐
+                   │                                                 │
+            (Truy cập Web)                                   (Chấm điểm Audio)
+                   ▼                                                 ▼
+        ┌─────────────────────┐                           ┌─────────────────────┐
+        │  Next.js Frontend   │                           │  FastAPI AI Backend │
+        │   (Deploy Vercel)   │                           │    (Deploy GCP VM)  │
+        ├─────────────────────┤                           ├─────────────────────┤
+        │ • Global Edge CDN   │                           │ • GCP c2-standard-8 │
+        │ • Serverless 0đ     │                           │ • PyTorch Wav2Vec2  │
+        │ • Auto SSL & Scale  │                           │ • Faster-Whisper    │
+        │ • Auto Build Git    │                           │ • FastDTW + TTS     │
+        └─────────────────────┘                           └─────────────────────┘
+                   │                                                 │
+                   └──────────────────┬──────────────────────────────┘
+                                      ▼
+                        ┌───────────────────────────┐
+                        │       Firebase Cloud      │
+                        │ • Auth (Email / Role)     │
+                        │ • Cloud Firestore (DB)    │
+                        │ • Storage (Audio Upload)  │
+                        └───────────────────────────┘
+```
+
+### 🔄 Luồng Tự động Hóa (CI/CD Workflow)
+Khi bạn chạy script `sync_git.bat` (`git push origin main`):
+1. **Frontend (Vercel):** Nhận Webhook từ GitHub ➔ Tự động `npm install` & `next build` ➔ Deploy bản mới trong 1 phút.
+2. **Backend (GitHub Actions):** Tự động SSH vào GCP VM ➔ `git pull origin main` ➔ `pip install` ➔ Khởi động lại service `pronuncheck-backend`.
 
 ---
 
 ## 📸 Tổng quan tính năng
 
-### Công nghệ Lõi AI V3 (MỚI)
-
+### Công nghệ Lõi AI V3
 1. **Chấm điểm theo Ký tự (Character-level)**: 
    Sử dụng `torchaudio.functional.forced_align` kết hợp với Wav2Vec2 XLSR để tính điểm phát âm cho *từng chữ cái/âm tiết* trong từ.
 2. **Chấm điểm Ngữ điệu (Intonation)**:
@@ -29,36 +68,42 @@
 | 🎯 **Feedback chi tiết** | AI chỉ ra học sinh phát âm sai chữ cái nào và sai như thế nào |
 | 🔐 **Auth theo vai trò** | Phân vai Học sinh / Giáo viên |
 | 🎤 **Ghi âm trực tiếp** | Thu âm qua trình duyệt, nghe lại trước khi nộp |
-| 🏫 **Hệ thống lớp học** | GV tạo lớp → HS tham gia bằng mã + mật khẩu |
-| 📋 **Giao & làm bài tập** | GV giao bài → HS làm → GV xem kết quả + nghe audio |
+| 🏫 **Hệ thống lớp học** | GV tạo lớp ➔ HS tham gia bằng mã + mật khẩu |
+| 📋 **Giao & làm bài tập** | GV giao bài ➔ HS làm ➔ GV xem kết quả + nghe audio |
 
 ---
 
 ## 🛠 Tech Stack
 
-| Layer | Công nghệ |
-|---|---|
-| **Frontend** | Next.js 16.3 • React 19 • TypeScript • Tailwind CSS 4 |
-| **Backend** | Python FastAPI • Uvicorn (multi-worker) |
-| **AI: Forced Alignment** | Wav2Vec2 (`facebook/wav2vec2-large-xlsr-53-german`) — PyTorch |
-| **AI: Transcription** | Faster-Whisper (`base`) — CTranslate2 |
-| **AI: Intonation** | FastDTW • Librosa MFCC |
-| **TTS (Audio mẫu)** | Google Cloud Text-to-Speech API |
-| **Database & Storage** | Firebase Auth • Cloud Firestore • Storage |
+| Layer | Công nghệ | Nơi Triển Khai |
+|---|---|---|
+| **Frontend** | Next.js 16.3 • React 19 • TypeScript • Tailwind CSS 4 | **Vercel** (Serverless) |
+| **Backend** | Python FastAPI • Uvicorn (4 Workers) | **GCP VM** (`c2-standard-8`) |
+| **AI: Forced Alignment** | Wav2Vec2 (`facebook/wav2vec2-large-xlsr-53-german`) — PyTorch | GCP VM |
+| **AI: Transcription** | Faster-Whisper (`base`) — CTranslate2 | GCP VM |
+| **AI: Intonation** | FastDTW • Librosa MFCC | GCP VM |
+| **TTS (Audio mẫu)** | Google Cloud Text-to-Speech API | GCP VM |
+| **Database & Storage** | Firebase Auth • Cloud Firestore • Storage | Firebase Cloud |
 
 ---
 
-## 🚀 Hướng dẫn cài đặt & chạy
+## 🚀 Hướng dẫn cài đặt & Triển khai
 
-### Yêu cầu
+### 1. Cấu hình Frontend trên Vercel
+1. Import repository vào Vercel.
+2. Tại **Settings ➔ General**: Đặt **Root Directory** là `frontend-pronuncheck`.
+3. Thêm các biến môi trường tại **Settings ➔ Environment Variables**:
+   ```env
+   NEXT_PUBLIC_FIREBASE_API_KEY=xxx
+   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=xxx
+   NEXT_PUBLIC_FIREBASE_PROJECT_ID=xxx
+   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=xxx
+   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=xxx
+   NEXT_PUBLIC_FIREBASE_APP_ID=xxx
+   NEXT_PUBLIC_API_URL=https://api.thuy-tien.pro
+   ```
 
-- **Node.js** 18+
-- **Python** 3.10+
-- **Firebase project** (bật Auth + Firestore + Storage)
-- **Google Cloud Service Account** (có quyền Text-to-Speech API)
-- **RAM** ≥ 8GB
-
-### 1. Clone & cài đặt
+### 2. Cài đặt Cục bộ (Local Development)
 
 ```bash
 git clone <repo-url>
@@ -74,27 +119,8 @@ cd frontend-pronuncheck
 npm install
 ```
 
-### 2. Cấu hình Key & Môi trường
-
-**A. Firebase Frontend**:
-Tạo `frontend-pronuncheck/.env.local`:
-```env
-NEXT_PUBLIC_FIREBASE_API_KEY=xxx
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=xxx
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=xxx
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=xxx
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=xxx
-NEXT_PUBLIC_FIREBASE_APP_ID=xxx
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-**B. Google Cloud Backend**:
-Đặt file service account key tại `DT3_PronunCheck/google_key.json` để API Text-to-Speech hoạt động.
-
-### 3. Chạy ứng dụng
-
+**Khởi chạy cục bộ (Windows):**
 ```bash
-# Windows
 start_servers.bat
 ```
 
@@ -137,12 +163,5 @@ start_servers.bat
 
 ---
 
-## 🚧 Trạng thái phát triển
-
-- ✅ AI Engine V3 (Forced Alignment + DTW) — **HOẠT ĐỘNG**
-- ✅ Auto-generate Audio Mẫu (Google TTS)
-- ✅ Role-based Authentication (Student / Teacher)
-- ✅ Student & Teacher Dashboards
-- ⚠️ UI hiển thị `char_scores` chưa hoàn thiện
-- ⚠️ Cần đồng bộ Firestore Schema
-- 📋 Xem chi tiết tại [`roadmap.md`](roadmap.md)
+## 📄 License
+Private project — DT3 Team.

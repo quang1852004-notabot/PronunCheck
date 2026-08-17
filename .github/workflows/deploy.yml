@@ -1,32 +1,31 @@
-name: Auto Deploy to GCP VM
+name: Auto Deploy Backend to GCP VM
 
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  deploy:
+  deploy-backend:
+    name: Deploy Python AI Backend to GCP VM
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to VM via SSH
+      - name: Deploy Backend via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            echo "--- Dang cap nhat code tu Git ---"
+            echo "--- [1/3] Đang kéo code mới nhất từ Git ---"
             cd /home/quang18_5_2004/PronunCheck
-            
-            # Keo code moi nhat ve
             git pull origin main
             
-            # Cài đặt các thư viện mới nếu có
+            echo "--- [2/3] Cài đặt & cập nhật dependencies Backend ---"
             source venv/bin/activate
             pip install -r requirements.txt
             
-            # Khoi dong lai service de ap dung code moi ngay lap tuc
+            echo "--- [3/3] Khởi động lại service Backend (FastAPI / AI) ---"
             sudo systemctl restart pronuncheck-backend
-            sudo systemctl restart pronuncheck-frontend
             
-            echo "--- Cap nhat va khoi dong lai thanh cong! ---"
+            echo "=== BACKEND DEPLOYED & RESTARTED SUCCESSFULLY ==="
+            # Ghi chú: Frontend (Next.js) được Vercel tự động build & deploy qua Git Webhook.
