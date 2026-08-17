@@ -11,3 +11,4 @@ google-cloud-texttospeech
 gTTS
 soundfile
 sentry-sdk[fastapi]>=2.0.0
+noisereduce>=3.0.0

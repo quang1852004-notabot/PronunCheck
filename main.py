@@ -198,6 +198,9 @@ def assess_pronunciation(
         # 2. Giải mã âm thanh thành mảng float32 16kHz
         audio_array = decode_audio(file_path, sampling_rate=16000)
 
+        # 2.1. Tiền xử lý khử nhiễu & trừ nền tạp âm Spectral Gating (quán cafe, tiếng nhạc, quạt gió)
+        audio_array = scoring.preprocess_denoise_audio(audio_array, sr=16000)
+
         # Ghi nhận Sentry Breadcrumb cho lượt chấm điểm AI
         sentry_sdk.add_breadcrumb(
             category="ai_scoring",

@@ -18,7 +18,7 @@ export default function AudioLevelMeter({
   onClosePreview,
 }: AudioLevelMeterProps) {
   const { t } = useLanguage();
-  const [level, setLevel] = useState(0); // 0 to 100
+  const [displayedLevel, setDisplayedLevel] = useState(0); // 0 to 100 (Throttled 800ms)
   const barCount = mode === 'preview' ? 24 : 16;
   const [frequencies, setFrequencies] = useState<number[]>(new Array(barCount).fill(6));
   const [noiseStatus, setNoiseStatus] = useState<'quiet' | 'optimal' | 'noisy'>('optimal');
@@ -27,10 +27,13 @@ export default function AudioLevelMeter({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const smoothedLevelRef = useRef<number>(0);
+  const lastThrottleTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (!stream) {
-      setLevel(0);
+      setDisplayedLevel(0);
+      smoothedLevelRef.current = 0;
       setFrequencies(new Array(barCount).fill(6));
       setNoiseStatus('optimal');
       return;
@@ -43,7 +46,7 @@ export default function AudioLevelMeter({
 
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = mode === 'preview' ? 128 : 64;
-      analyser.smoothingTimeConstant = 0.5;
+      analyser.smoothingTimeConstant = 0.6;
       analyserRef.current = analyser;
 
       const source = audioCtx.createMediaStreamSource(stream);
@@ -51,6 +54,7 @@ export default function AudioLevelMeter({
       sourceRef.current = source;
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      lastThrottleTimeRef.current = performance.now();
 
       const updateMeter = () => {
         if (!analyserRef.current) return;
@@ -70,17 +74,28 @@ export default function AudioLevelMeter({
         }
 
         const avg = sum / activeBins;
-        const normalizedLevel = Math.min(100, Math.round((avg / 140) * 100));
+        const instantLevel = Math.min(100, Math.round((avg / 135) * 100));
 
-        setLevel(normalizedLevel);
+        // Exponential Moving Average (EMA) để làm mịn xung nhiễu
+        smoothedLevelRef.current = smoothedLevelRef.current * 0.8 + instantLevel * 0.2;
+
+        // Vạch sóng đồ họa cập nhật mượt mà theo từng frame
         setFrequencies(barValues);
 
-        if (normalizedLevel < 15) {
-          setNoiseStatus('quiet');
-        } else if (normalizedLevel > 65) {
-          setNoiseStatus('noisy');
-        } else {
-          setNoiseStatus('optimal');
+        // Throttle: Chỉ cập nhật con số phần trăm và trạng thái mỗi 800ms một lần
+        const now = performance.now();
+        if (now - lastThrottleTimeRef.current >= 800) {
+          lastThrottleTimeRef.current = now;
+          const currentSmooth = Math.round(smoothedLevelRef.current);
+          setDisplayedLevel(currentSmooth);
+
+          if (currentSmooth < 15) {
+            setNoiseStatus('quiet');
+          } else if (currentSmooth > 65) {
+            setNoiseStatus('noisy');
+          } else {
+            setNoiseStatus('optimal');
+          }
         }
 
         animationFrameRef.current = requestAnimationFrame(updateMeter);
@@ -131,7 +146,7 @@ export default function AudioLevelMeter({
               <button
                 type="button"
                 onClick={onClosePreview}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition-colors"
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition-colors cursor-pointer"
                 title="Đóng kiểm tra"
               >
                 <X className="w-4 h-4" />
@@ -140,30 +155,30 @@ export default function AudioLevelMeter({
           </div>
         </div>
 
-        {/* Dynamic Status Banner */}
+        {/* Dynamic Status Banner (Throttled 800ms) */}
         <div className="flex items-center justify-between text-xs px-1">
           <div className="flex items-center gap-1.5 font-bold">
-            {level < 5 ? (
+            {displayedLevel < 5 ? (
               <VolumeX className="w-4 h-4 text-gray-500" />
             ) : (
-              <Volume2 className="w-4 h-4 text-cyan-400 animate-pulse" />
+              <Volume2 className="w-4 h-4 text-cyan-400" />
             )}
-            <span className="text-gray-300">Tín hiệu vào: <strong className="text-white font-mono">{level}%</strong></span>
+            <span className="text-gray-300">Tín hiệu vào: <strong className="text-white font-mono text-sm">{displayedLevel}%</strong></span>
           </div>
 
           <div>
             {noiseStatus === 'quiet' && (
-              <span className="text-xs text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/50 border border-emerald-800/50 px-2.5 py-0.5 rounded-md">
+              <span className="text-xs text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/50 border border-emerald-800/50 px-2.5 py-0.5 rounded-md transition-all">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Môi trường yên tĩnh
               </span>
             )}
             {noiseStatus === 'optimal' && (
-              <span className="text-xs text-lime-400 font-bold flex items-center gap-1 bg-lime-950/50 border border-lime-800/50 px-2.5 py-0.5 rounded-md">
+              <span className="text-xs text-lime-400 font-bold flex items-center gap-1 bg-lime-950/50 border border-lime-800/50 px-2.5 py-0.5 rounded-md transition-all">
                 <CheckCircle2 className="w-3.5 h-3.5" /> Âm lượng thu tốt
               </span>
             )}
             {noiseStatus === 'noisy' && (
-              <span className="text-xs text-amber-400 font-bold flex items-center gap-1 bg-amber-950/60 border border-amber-700/60 px-2.5 py-0.5 rounded-md animate-pulse">
+              <span className="text-xs text-amber-400 font-bold flex items-center gap-1 bg-amber-950/60 border border-amber-700/60 px-2.5 py-0.5 rounded-md transition-all">
                 <AlertCircle className="w-3.5 h-3.5" /> Môi trường ồn (Quán cafe/Nhạc)
               </span>
             )}
@@ -196,7 +211,7 @@ export default function AudioLevelMeter({
 
         {/* Helpful Tip */}
         <p className="text-[11px] text-gray-400 text-center leading-relaxed">
-          💡 <strong className="text-gray-300">Mẹo:</strong> Hãy nói thử một câu. Khi bạn im lặng, nếu vạch sóng vẫn đỏ cao (&gt;60%), hãy chuyển sang góc yên tĩnh hơn hoặc đeo tai nghe có mic gần miệng.
+          💡 <strong className="text-gray-300">Mẹo:</strong> Hãy nói thử một câu. Khi bạn im lặng, nếu vạch sóng vẫn đỏ cao (&gt;65%), hãy chuyển sang góc yên tĩnh hơn hoặc đeo tai nghe có mic gần miệng.
         </p>
       </div>
     );
@@ -210,10 +225,10 @@ export default function AudioLevelMeter({
       {/* Header Info */}
       <div className="flex items-center justify-between text-xs">
         <div className="flex items-center gap-1.5 font-bold">
-          {level < 5 ? (
+          {displayedLevel < 5 ? (
             <VolumeX className="w-3.5 h-3.5 text-gray-500" />
           ) : (
-            <Volume2 className="w-3.5 h-3.5 text-lime-400 animate-pulse" />
+            <Volume2 className="w-3.5 h-3.5 text-lime-400" />
           )}
           <span className="text-gray-300">Tín hiệu Micro:</span>
         </div>
@@ -226,12 +241,12 @@ export default function AudioLevelMeter({
           )}
           {noiseStatus === 'optimal' && (
             <span className="text-[11px] text-green-400 font-bold">
-              ✓ Âm lượng tốt ({level}%)
+              ✓ Âm lượng tốt ({displayedLevel}%)
             </span>
           )}
           {noiseStatus === 'noisy' && (
             <span className="text-[11px] text-amber-400 flex items-center gap-1 font-bold">
-              <AlertCircle className="w-3 h-3" /> Môi trường ồn ({level}%)
+              <AlertCircle className="w-3 h-3" /> Môi trường ồn ({displayedLevel}%)
             </span>
           )}
         </div>
