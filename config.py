@@ -1,16 +1,14 @@
 """
 ================================================================================
-                    CẤU HÌNH HỆ THỐNG LIGHT SCORING BACKEND
+                    CẤU HÌNH HỆ THỐNG PRONUNCHECK BACKEND
 ================================================================================
-File này chứa toàn bộ các thông số cấu hình về tài nguyên CPU, số luồng (threads),
-số tiến trình (workers), và mô hình AI để bạn dễ dàng tinh chỉnh theo cấu hình máy.
+File cấu hình tập trung cho Web Server, đa luồng phần cứng và các module AI
+(bao gồm Light_ScoringBackend và HuBERT Pro Tier trong tương lai).
 ================================================================================
 """
 
 import os
 import torch
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ==============================================================================
 # 1. CẤU HÌNH SERVER & TIẾN TRÌNH (UVICORN / GUNICORN)
@@ -91,7 +89,7 @@ PASSING_THRESHOLD = 55.0 # Điểm qua môn (trên thang 100)
 # ==============================================================================
 # 6. CẤU HÌNH LƯU TRỮ VÀ TẢI FILE
 # ==============================================================================
-UPLOAD_DIR = os.path.join(BASE_DIR, "temp_audio")
-REFERENCE_AUDIO_DIR = os.path.join(BASE_DIR, "reference_audio")
+UPLOAD_DIR = "temp_audio"
+REFERENCE_AUDIO_DIR = "reference_audio"
 MAX_FILE_SIZE_MB = 10
 ALLOWED_EXTENSIONS = {"wav", "webm", "mp3", "ogg"}

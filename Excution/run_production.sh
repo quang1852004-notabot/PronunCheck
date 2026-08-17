@@ -17,11 +17,10 @@ export MKL_NUM_THREADS=4
 export OPENBLAS_NUM_THREADS=4
 
 echo "============================================================"
-echo " Starting DT3 Light Scoring Backend on c2-standard-8 "
+echo " Starting DT3 PronunCheck API on c2-standard-8 (4 Workers) "
 echo "============================================================"
 
-# Chuyển vào thư mục Light_ScoringBackend và chạy Uvicorn
-cd Light_ScoringBackend
+# Chạy Uvicorn trực tiếp từ thư mục gốc (main:app)
 exec uvicorn main:app \
     --host 0.0.0.0 \
     --port 8000 \

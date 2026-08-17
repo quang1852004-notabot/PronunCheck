@@ -16,31 +16,32 @@
 
 ```
 DT3_PronunCheck/
-├── Excution/                  # Tập lệnh khởi chạy hệ thống (Local & Production Server)
+├── main.py                    # 🚪 API Gateway & FastAPI Entry Point (/api/v1/assess)
+├── config.py                  # ⚙️ Cấu hình tập trung (Server, CPU đa luồng, mô hình AI)
+├── requirements.txt           # 📦 Danh sách dependencies Python chính
+│
+├── Light_ScoringBackend/      # 🧠 Package AI Chấm điểm Thứ cấp (Light Tier Engine)
+│   ├── __init__.py            # Khởi tạo package Python & export scoring, german_phonetics
+│   ├── scoring.py             # Thuật toán Dynamic Sigmoid Scoring V3.5, F0 Pitch DTW & Parallel Execution
+│   ├── german_phonetics.py    # Bộ luật ngữ âm tiếng Đức (Ich/Ach, Vô thanh hóa, Vowel Duration, Normalizer)
+│   └── README.md              # Tài liệu kỹ thuật chi tiết của package Light Backend
+│
+├── training_pipeline/         # 🚀 Pipeline huấn luyện HuBERT Large IPA (Pro Tier - GPU Training)
+│   ├── GCP_HUBERT_TRAINING_PLAYBOOK.md # Sổ tay hướng dẫn huấn luyện HuBERT Large trên GCP L4 GPU
+│   └── run_training_v2.py     # Script tiền xử lý & fine-tune mô hình HuBERT sang bảng ký âm IPA
+│
+├── frontend-pronuncheck/      # 💻 Web Application xây dựng bằng Next.js 16 (App Router)
+│   ├── app/                   # Các trang ứng dụng (Student, Teacher, Auth, Dashboard)
+│   ├── public/                # Static assets, icons, manifest
+│   └── package.json           # Dependencies Next.js, React 19, Tailwind CSS 4
+│
+├── Excution/                  # 🛠️ Tập lệnh khởi chạy hệ thống (Local & Production Server)
 │   ├── check_backend.bat      # Kiểm tra trạng thái kết nối tới máy chủ GCP VM
 │   ├── run_production.sh      # Script khởi chạy FastAPI trên GCP VM (4 Workers, OMP 4 luồng)
 │   ├── start_servers.bat      # Khởi động đồng thời Backend và Frontend cho môi trường Local
 │   └── sync_git.bat           # Đồng bộ mã nguồn lên GitHub tự động kích hoạt CI/CD
 │
-├── Light_ScoringBackend/      # Toàn bộ AI Backend Sơ cấp (Light Tier - Đang chạy Production)
-│   ├── __init__.py            # Khởi tạo package
-│   ├── main.py                # FastAPI Service, Lifespan Warm-up & REST API (/api/v1/assess)
-│   ├── scoring.py             # Thuật toán Dynamic Sigmoid Scoring V3.5, F0 Pitch DTW & Parallel Execution
-│   ├── german_phonetics.py    # Bộ luật ngữ âm tiếng Đức (Ich/Ach, Vô thanh hóa, Vowel Duration, Normalizer)
-│   ├── config.py              # Cấu hình phần cứng CPU, đa luồng, mô hình AI & trọng số
-│   ├── requirements.txt       # Danh sách thư viện Python cần thiết
-│   └── README.md              # Tài liệu chi tiết module Light Backend
-│
-├── training_pipeline/         # Pipeline huấn luyện HuBERT Large IPA (Pro Tier - GPU Training)
-│   ├── GCP_HUBERT_TRAINING_PLAYBOOK.md # Sổ tay hướng dẫn huấn luyện HuBERT Large trên GCP L4 GPU
-│   └── run_training_v2.py     # Script tiền xử lý & fine-tune mô hình HuBERT sang bảng ký âm IPA
-│
-├── frontend-pronuncheck/      # Web Application xây dựng bằng Next.js 16 (App Router)
-│   ├── app/                   # Các trang ứng dụng (Student, Teacher, Auth, Dashboard)
-│   ├── public/                # Static assets, icons, manifest
-│   └── package.json           # Dependencies Next.js, React 19, Tailwind CSS 4
-│
-├── test/                      # Bộ kiểm thử tự động (Unit Test Suites)
+├── test/                      # 🧪 Bộ kiểm thử tự động (Unit Test Suites)
 │   ├── test_light_scoring.py  # 11 unit tests kiểm tra luật ngữ âm Đức & thuật toán chấm điểm
 │   └── ElevenLabs_2026-08-Schule.mp3 # File âm thanh mẫu kiểm thử
 │
@@ -62,13 +63,14 @@ Dự án tách biệt hoàn toàn giữa **Frontend (Serverless Edge)** và **Ba
             (Truy cập Web)                                   (Chấm điểm Audio)
                    ▼                                                 ▼
         ┌─────────────────────┐                           ┌─────────────────────┐
-        │  Next.js Frontend   │                           │  FastAPI AI Backend │
+        │  Next.js Frontend   │                           │  FastAPI AI Gateway │
         │   (Deploy Vercel)   │                           │    (Deploy GCP VM)  │
         ├─────────────────────┤                           ├─────────────────────┤
         │ • Global Edge CDN   │                           │ • GCP c2-standard-8 │
-        │ • Serverless 0đ     │                           │ • PyTorch Wav2Vec2  │
-        │ • Auto SSL & Scale  │                           │ • Faster-Whisper    │
-        │ • Auto Build Git    │                           │ • FastDTW + TTS     │
+        │ • Serverless 0đ     │                           │ • Light_Scoring     │
+        │ • Auto SSL & Scale  │                           │ • PyTorch Wav2Vec2  │
+        │ • Auto Build Git    │                           │ • Faster-Whisper    │
+        │ • Tailwind CSS 4    │                           │ • FastDTW + TTS     │
         └─────────────────────┘                           └─────────────────────┘
                    │                                                 │
                    └──────────────────┬──────────────────────────────┘
@@ -84,7 +86,7 @@ Dự án tách biệt hoàn toàn giữa **Frontend (Serverless Edge)** và **Ba
 ### 🔄 Luồng Tự động Hóa (CI/CD Workflow)
 Khi thực hiện `git push origin main` (hoặc chạy `Excution/sync_git.bat`):
 1. **Frontend (Vercel):** Nhận Webhook từ GitHub ➔ Tự động build và deploy bản mới trên mạng Edge toàn cầu.
-2. **Backend (GitHub Actions):** Tự động SSH vào GCP VM (`.github/workflows/deploy.yml`) ➔ `git pull origin main` ➔ `pip install` ➔ Khởi động lại service `pronuncheck-backend`.
+2. **Backend (GitHub Actions):** Tự động SSH vào GCP VM (`.github/workflows/deploy.yml`) ➔ `git pull origin main` ➔ `pip install -r requirements.txt` ➔ Khởi động lại service `pronuncheck-backend`.
 
 ---
 
@@ -118,7 +120,7 @@ cd DT3_PronunCheck
 # Cài đặt môi trường Backend
 python -m venv venv
 venv\Scripts\activate        # Windows
-pip install -r Light_ScoringBackend/requirements.txt
+pip install -r requirements.txt
 
 # Cài đặt môi trường Frontend
 cd frontend-pronuncheck
@@ -142,6 +144,7 @@ python test/test_light_scoring.py
 
 | Method | Endpoint | Mô tả |
 |---|---|---|
+| `GET` | `/` | Kiểm tra trạng thái máy chủ (Health Check) |
 | `POST` | `/api/v1/assess` | Đánh giá audio và trả về điểm chi tiết từng âm vị, ngữ điệu, và feedback sư phạm |
 
 **Request**: `multipart/form-data` (`audio_file`, `expected_word`)
@@ -152,21 +155,21 @@ python test/test_light_scoring.py
   "status": "success",
   "word": "Schule",
   "char_scores": [
-    { "char": "S", "score": 0.96, "actual": "S", "duration_frames": 8 },
-    { "char": "C", "score": 0.98, "actual": "C", "duration_frames": 6 },
-    { "char": "H", "score": 0.95, "actual": "H", "duration_frames": 5 },
-    { "char": "U", "score": 0.92, "actual": "U", "duration_frames": 10 },
-    { "char": "L", "score": 0.94, "actual": "L", "duration_frames": 7 },
-    { "char": "E", "score": 0.91, "actual": "E", "duration_frames": 6 }
+    { "char": "S", "score": 0.95, "actual": "S", "duration_frames": 18 },
+    { "char": "C", "score": 0.92, "actual": "C", "duration_frames": 12 },
+    { "char": "H", "score": 0.93, "actual": "H", "duration_frames": 14 },
+    { "char": "U", "score": 0.91, "actual": "U", "duration_frames": 35, "duration_multiplier": 1.0 },
+    { "char": "L", "score": 0.88, "actual": "L", "duration_frames": 10 },
+    { "char": "E", "score": 0.89, "actual": "E", "duration_frames": 15 }
   ],
   "assessment": {
-    "precise_score": 94.33,
+    "precise_score": 91.33,
     "whisper_score": 100.0,
-    "dtw_score": 86.42,
-    "fluent_score": 91.85,
-    "hybrid_target_score": 93.88,
+    "dtw_score": 85.4,
+    "fluent_score": 91.24,
+    "hybrid_target_score": 88.52,
     "is_passed": true,
-    "feedback": "Tuyệt vời! Bạn phát âm rất rõ ràng, chuẩn xác các âm vị và ngữ điệu tự nhiên như người bản xứ.",
+    "feedback": "Phát âm rất tốt! Bạn đã phát âm chính xác các âm đặc trưng.",
     "weights": {
       "w_acc": 0.818,
       "w_flu": 0.182,

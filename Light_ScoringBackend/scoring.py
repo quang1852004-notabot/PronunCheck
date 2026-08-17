@@ -32,12 +32,16 @@ try:
 except ImportError:
     texttospeech = None
 
-# Hỗ trợ cả import trực tiếp lẫn import theo package
+# Import config từ thư mục gốc và german_phonetics từ cùng package
 try:
-    from . import config, german_phonetics
+    from . import german_phonetics
 except ImportError:
-    import config
     import german_phonetics
+
+try:
+    import config
+except ImportError:
+    from .. import config
 
 # Tự động phát hiện và nạp Service Account Key cho Google Cloud TTS API
 base_dir = os.path.dirname(os.path.abspath(__file__))

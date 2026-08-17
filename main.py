@@ -1,17 +1,15 @@
 """
 ================================================================================
-                    PRONUNCHECK FASTAPI BACKEND SERVICE
+                    PRONUNCHECK FASTAPI BACKEND SERVICE (GATEWAY)
 ================================================================================
 Dự án: DT3_PronunCheck
-Thành phần: Light Scoring Backend (FastAPI + Wav2Vec2 + Faster-Whisper + F0 DTW)
-
-Quy trình hoạt động:
+Kiến trúc: Gateway & API Routing
   - Cung cấp REST API đánh giá phát âm tiếng Đức (/api/v1/assess).
-  - Tích hợp mô hình Hybrid AI chạy song song đa luồng (ThreadPoolExecutor):
+  - Tích hợp mô hình Hybrid AI từ package Light_ScoringBackend:
       1. Wav2Vec2 (CTC Forced Alignment / Phoneme-level scoring + German Phonetics)
       2. Faster-Whisper Tiny (ASR word-level completeness factor)
       3. F0 + FastDTW (Pitch contour intonation matching với Google TTS)
-  - Tổng hợp kết quả và trả về điểm số chi tiết từng ký tự/âm tiết cho Frontend.
+  - Kiến trúc mở: Sẵn sàng định tuyến thêm HuBERT Large IPA Pro Tier.
 ================================================================================
 """
 
@@ -20,7 +18,6 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
-import sys
 import uuid
 import numpy as np
 import torch
@@ -28,12 +25,9 @@ from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import traceback
 
-# Hỗ trợ cả import trực tiếp lẫn import theo package
-try:
-    from . import config, scoring
-except ImportError:
-    import config
-    import scoring
+# Import cấu hình và module chấm điểm từ package Light_ScoringBackend
+import config
+from Light_ScoringBackend import scoring, german_phonetics
 
 # Thư viện mô hình AI
 from faster_whisper import WhisperModel
@@ -59,7 +53,7 @@ executor = ThreadPoolExecutor(max_workers=config.PARALLEL_AI_WORKERS)
 # ==============================================================================
 # 2. KHỞI TẠO CÁC MÔ HÌNH AI (GLOBAL INSTANCES)
 # ==============================================================================
-print(f"Loading AI models on {config.DEVICE.upper()} (Light Tier Mode)...", flush=True)
+print(f"Loading AI models on {config.DEVICE.upper()} (Light Tier Engine)...", flush=True)
 
 # 2.1. Tải mô hình Faster-Whisper Tiny (nhận diện nhanh & tiết kiệm RAM)
 try:
@@ -118,7 +112,7 @@ async def lifespan(app: FastAPI):
 # 4. KHỞI TẠO FASTAPI APP & CORS MIDDLEWARE
 # ==============================================================================
 app = FastAPI(
-    title="PronunCheck Light Scoring Service",
+    title="PronunCheck AI Backend Service",
     version="3.5",
     lifespan=lifespan
 )
@@ -134,8 +128,21 @@ app.add_middleware(
 
 
 # ==============================================================================
-# 5. API ENDPOINT ĐÁNH GIÁ PHÁT ÂM
+# 5. API ENDPOINTS
 # ==============================================================================
+@app.get("/")
+def health_check():
+    return {
+        "status": "online",
+        "service": "PronunCheck AI Backend",
+        "tier": "Light_ScoringBackend (AI V3.5)",
+        "models": {
+            "asr": config.WHISPER_MODEL_NAME,
+            "phonetic": config.WAV2VEC_MODEL_NAME,
+            "intonation": "F0 FastDTW (pYIN Semitones)"
+        }
+    }
+
 @app.post("/api/v1/assess")
 def assess_pronunciation(
     audio_file: UploadFile = File(..., description="File âm thanh ghi âm từ microphone của học sinh"),
@@ -149,10 +156,10 @@ def assess_pronunciation(
       2. Decode file audio về mảng numpy 1D tần số lấy mẫu 16kHz chuẩn.
       3. Gửi đồng thời 3 tác vụ tính điểm vào ThreadPoolExecutor (non-blocking):
          - analyze_precise_score (Wav2Vec2 CTC alignment + German phonetics)
-         - analyze_with_whisperx (Whisper Tiny ASR + soft completeness)
+         - analyze_with_whisperx (Whisper Tiny ASR + robust text normalization)
          - calculate_dtw_score (F0 Pitch DTW intonation matching)
       4. Chờ cả 3 tác vụ hoàn thành (.result()).
-      5. Gọi hàm calculate_dynamic_score với công thức trọng số Sigmoid động.
+      5. Gọi hàm calculate_dynamic_score với công thức trọng số Sigmoid động tuyến tính.
       6. Khối `finally` đảm bảo xóa file audio tạm để giải phóng ổ cứng.
     """
     file_path = ""
