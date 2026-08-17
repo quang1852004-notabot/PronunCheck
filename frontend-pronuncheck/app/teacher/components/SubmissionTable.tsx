@@ -13,9 +13,13 @@ import {
   Search, 
   RotateCcw, 
   Volume2, 
+  Pause,
+  Play,
+  Loader2,
   X, 
   CheckCircle2, 
-  XCircle 
+  XCircle,
+  Calendar
 } from 'lucide-react';
 
 interface SubmissionTableProps {
@@ -23,16 +27,30 @@ interface SubmissionTableProps {
   assignments: AssignmentData[];
 }
 
-type SortField = 'email' | 'word' | 'attempt' | 'wav2vec' | 'dtw' | 'whisper' | 'total' | 'result';
+type SortField = 'email' | 'word' | 'time' | 'attempt' | 'wav2vec' | 'dtw' | 'whisper' | 'total' | 'result';
 type SortDirection = 'asc' | 'desc';
+
+// Safely normalize score to integer [0, 100]
+function normalizeScore(val: any): number {
+  if (val === undefined || val === null) return 0;
+  let n = Number(val);
+  if (isNaN(n) || !isFinite(n)) return 0;
+  while (n > 100) n = n / 100;
+  if (n <= 1.0 && n > 0) n = n * 100;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
 
 export default function SubmissionTable({ submissions, assignments }: SubmissionTableProps) {
   const { t } = useLanguage();
   const { error: toastError } = useToast();
-  const [playingAudio, setPlayingAudio] = useState<string | null>(null);
 
-  // Sorting State
-  const [sortField, setSortField] = useState<SortField | null>(null);
+  // Audio Playback State
+  const [playingSubId, setPlayingSubId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const audioInstanceRef = useRef<HTMLAudioElement | null>(null);
+
+  // Sorting State - Default sort by 'time' descending
+  const [sortField, setSortField] = useState<SortField | null>('time');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Filter States
@@ -57,6 +75,16 @@ export default function SubmissionTable({ submissions, assignments }: Submission
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Stop audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioInstanceRef.current) {
+        audioInstanceRef.current.pause();
+        audioInstanceRef.current = null;
+      }
+    };
   }, []);
 
   // Map assignmentId -> AssignmentData for quick lookup
@@ -136,36 +164,37 @@ export default function SubmissionTable({ submissions, assignments }: Submission
           bVal = bTitle.toLowerCase();
           break;
         }
+        case 'time': {
+          const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0);
+          const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0);
+          aVal = aTime;
+          bVal = bTime;
+          break;
+        }
         case 'attempt':
           aVal = a.attemptNumber || 1;
           bVal = b.attemptNumber || 1;
           break;
         case 'wav2vec':
-          aVal = a.detailedScore?.wav2vec_score || a.scores?.phoneme_score || 0;
-          bVal = b.detailedScore?.wav2vec_score || b.scores?.phoneme_score || 0;
+          aVal = normalizeScore(a.scores?.phoneme_score ?? a.detailedScore?.wav2vec_raw_score);
+          bVal = normalizeScore(b.scores?.phoneme_score ?? b.detailedScore?.wav2vec_raw_score);
           break;
         case 'dtw':
-          aVal = a.detailedScore?.dtw_score || a.scores?.dtw_score || 0;
-          bVal = b.detailedScore?.dtw_score || b.scores?.dtw_score || 0;
+          aVal = normalizeScore(a.scores?.dtw_score ?? a.detailedScore?.dtw_score);
+          bVal = normalizeScore(b.scores?.dtw_score ?? b.detailedScore?.dtw_score);
           break;
         case 'whisper':
-          aVal = a.detailedScore?.whisper_score || a.scores?.whisper_score || 0;
-          bVal = b.detailedScore?.whisper_score || b.scores?.whisper_score || 0;
+          aVal = normalizeScore(a.scores?.whisper_score ?? a.detailedScore?.whisper_raw_score);
+          bVal = normalizeScore(b.scores?.whisper_score ?? b.detailedScore?.whisper_raw_score);
           break;
         case 'total':
-          aVal = a.detailedScore?.hybrid_target_score 
-            ? (a.detailedScore.hybrid_target_score > 1 ? a.detailedScore.hybrid_target_score : a.detailedScore.hybrid_target_score * 100)
-            : (a.scores?.total_score ? a.scores.total_score * 100 : 0);
-          bVal = b.detailedScore?.hybrid_target_score 
-            ? (b.detailedScore.hybrid_target_score > 1 ? b.detailedScore.hybrid_target_score : b.detailedScore.hybrid_target_score * 100)
-            : (b.scores?.total_score ? b.scores.total_score * 100 : 0);
+          aVal = normalizeScore(a.scores?.total_score ?? a.detailedScore?.hybrid_target_score);
+          bVal = normalizeScore(b.scores?.total_score ?? b.detailedScore?.hybrid_target_score);
           break;
         case 'result':
           aVal = a.isPassed ? 1 : 0;
           bVal = b.isPassed ? 1 : 0;
           break;
-        default:
-          return 0;
       }
 
       if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
@@ -174,31 +203,72 @@ export default function SubmissionTable({ submissions, assignments }: Submission
     });
   }, [filteredSubmissions, sortField, sortDirection, assignmentMap]);
 
-  const handlePlayAudio = async (storagePath: string) => {
+  // Unified audio player function supporting both URL and Storage Path
+  const handlePlayAudio = async (sub: SubmissionData) => {
+    const subId = sub.id || `${sub.assignmentId}_${sub.studentId}_${sub.attemptNumber}`;
+
+    // If already playing this audio, pause it
+    if (playingSubId === subId) {
+      if (audioInstanceRef.current) {
+        audioInstanceRef.current.pause();
+        audioInstanceRef.current = null;
+      }
+      setPlayingSubId(null);
+      return;
+    }
+
+    // Stop current audio if playing another
+    if (audioInstanceRef.current) {
+      audioInstanceRef.current.pause();
+      audioInstanceRef.current = null;
+    }
+
+    const audioPathOrUrl = sub.audioUrl || sub.audioStoragePath || (sub as any).audioPath;
+    if (!audioPathOrUrl) {
+      toastError(t('sub.play_error'));
+      return;
+    }
+
+    setLoadingAudioId(subId);
+
     try {
-      const url = await getAudioUrl(storagePath);
+      const url = await getAudioUrl(audioPathOrUrl);
+      if (!url) throw new Error('No audio URL found');
+
       const audio = new Audio(url);
-      setPlayingAudio(storagePath);
-      audio.onended = () => setPlayingAudio(null);
+      audioInstanceRef.current = audio;
+
+      audio.onended = () => {
+        setPlayingSubId(null);
+        audioInstanceRef.current = null;
+      };
+
       audio.onerror = () => {
         toastError(t('sub.play_error'));
-        setPlayingAudio(null);
+        setPlayingSubId(null);
+        setLoadingAudioId(null);
+        audioInstanceRef.current = null;
       };
+
       await audio.play();
+      setPlayingSubId(subId);
     } catch (error) {
-      console.error(error);
+      console.error('Play audio error:', error);
       toastError(t('sub.play_error'));
-      setPlayingAudio(null);
+      setPlayingSubId(null);
+    } finally {
+      setLoadingAudioId(null);
     }
   };
 
-  const hasActiveFilters = selectedEmails.length > 0 || selectedAssignmentIds.length > 0 || selectedStatuses.length > 0 || sortField !== null;
+  const hasActiveFilters = selectedEmails.length > 0 || selectedAssignmentIds.length > 0 || selectedStatuses.length > 0 || sortField !== 'time';
 
   const handleResetFilters = () => {
     setSelectedEmails([]);
     setSelectedAssignmentIds([]);
     setSelectedStatuses([]);
-    setSortField(null);
+    setSortField('time');
+    setSortDirection('desc');
     setActivePopover(null);
   };
 
@@ -249,7 +319,7 @@ export default function SubmissionTable({ submissions, assignments }: Submission
             {sortField && (
               <span className="text-xs bg-gray-800 border border-gray-700 text-yellow-400 px-2 py-0.5 rounded-md flex items-center gap-1">
                 {sortField} ({sortDirection})
-                <X className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => setSortField(null)} />
+                <X className="w-3 h-3 cursor-pointer hover:text-white" onClick={() => setSortField('time')} />
               </span>
             )}
 
@@ -268,7 +338,7 @@ export default function SubmissionTable({ submissions, assignments }: Submission
         <table className="w-full text-xs sm:text-sm text-left text-gray-300">
           <thead className="text-[11px] sm:text-xs text-gray-300 uppercase bg-gray-900/95 border-b border-gray-700 select-none whitespace-nowrap">
             <tr>
-              {/* Cột 1: Email Học sinh */}
+              {/* Col 1: Email */}
               <th scope="col" className="px-5 py-4 min-w-[200px]">
                 <div className="flex items-center justify-between gap-2">
                   <button 
@@ -299,50 +369,52 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                           <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                           <input
                             type="text"
-                            value={emailSearchQuery}
-                            onChange={e => setEmailSearchQuery(e.target.value)}
                             placeholder={t('sub.search_email')}
+                            value={emailSearchQuery}
+                            onChange={(e) => setEmailSearchQuery(e.target.value)}
                             className="bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none w-full"
                           />
                         </div>
-
-                        <div className="flex justify-between text-xs text-blue-400 font-medium mb-2 px-1">
+                        <div className="flex justify-between text-[11px] text-blue-400 pb-1.5 border-b border-gray-700 mb-1.5 font-medium">
                           <button 
-                            type="button" 
                             onClick={() => setSelectedEmails(uniqueEmails)}
                             className="hover:underline cursor-pointer"
                           >
                             {t('sub.select_all')}
                           </button>
                           <button 
-                            type="button" 
                             onClick={() => setSelectedEmails([])}
-                            className="hover:underline text-gray-400 cursor-pointer"
+                            className="hover:underline cursor-pointer"
                           >
                             {t('sub.deselect_all')}
                           </button>
                         </div>
-
-                        <div className="max-h-48 overflow-y-auto space-y-1 pr-1 text-xs">
+                        <div className="max-h-48 overflow-y-auto space-y-1">
                           {uniqueEmails
-                            .filter(em => em.toLowerCase().includes(emailSearchQuery.toLowerCase()))
-                            .map(em => (
-                              <label key={em} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-700/60 rounded-lg cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedEmails.includes(em)}
-                                  onChange={e => {
-                                    if (e.target.checked) {
-                                      setSelectedEmails(prev => [...prev, em]);
-                                    } else {
-                                      setSelectedEmails(prev => prev.filter(x => x !== em));
-                                    }
-                                  }}
-                                  className="w-4 h-4 rounded border-gray-600 bg-gray-900 text-blue-500 focus:ring-0"
-                                />
-                                <span className="truncate text-gray-200" title={em}>{em}</span>
-                              </label>
-                            ))}
+                            .filter(email => email.toLowerCase().includes(emailSearchQuery.toLowerCase()))
+                            .map((email) => {
+                              const isChecked = selectedEmails.includes(email);
+                              return (
+                                <label 
+                                  key={email}
+                                  className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs text-gray-200"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedEmails([...selectedEmails, email]);
+                                      } else {
+                                        setSelectedEmails(selectedEmails.filter(e => e !== email));
+                                      }
+                                    }}
+                                    className="rounded bg-gray-900 border-gray-600 text-blue-600 focus:ring-0"
+                                  />
+                                  <span className="truncate">{email}</span>
+                                </label>
+                              );
+                            })}
                         </div>
                       </div>
                     )}
@@ -350,8 +422,8 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                 </div>
               </th>
 
-              {/* Cột 2: Bài tập / Từ cần đọc */}
-              <th scope="col" className="px-5 py-4 min-w-[200px]">
+              {/* Col 2: Assignment / Word */}
+              <th scope="col" className="px-5 py-4 min-w-[220px]">
                 <div className="flex items-center justify-between gap-2">
                   <button 
                     onClick={() => handleSort('word')}
@@ -381,62 +453,59 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                           <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                           <input
                             type="text"
-                            value={assignmentSearchQuery}
-                            onChange={e => setAssignmentSearchQuery(e.target.value)}
                             placeholder={t('sub.search_assignment')}
+                            value={assignmentSearchQuery}
+                            onChange={(e) => setAssignmentSearchQuery(e.target.value)}
                             className="bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none w-full"
                           />
                         </div>
-
-                        <div className="flex justify-between text-xs text-purple-400 font-medium mb-2 px-1">
+                        <div className="flex justify-between text-[11px] text-purple-400 pb-1.5 border-b border-gray-700 mb-1.5 font-medium">
                           <button 
-                            type="button" 
                             onClick={() => setSelectedAssignmentIds(assignments.map(a => a.id!).filter(Boolean))}
                             className="hover:underline cursor-pointer"
                           >
                             {t('sub.select_all')}
                           </button>
                           <button 
-                            type="button" 
                             onClick={() => setSelectedAssignmentIds([])}
-                            className="hover:underline text-gray-400 cursor-pointer"
+                            className="hover:underline cursor-pointer"
                           >
                             {t('sub.deselect_all')}
                           </button>
                         </div>
-
-                        <div className="max-h-48 overflow-y-auto space-y-1 pr-1 text-xs">
+                        <div className="max-h-48 overflow-y-auto space-y-1">
                           {assignments
                             .filter(a => {
-                              const text = `${a.title || ''} ${a.word}`.toLowerCase();
-                              return text.includes(assignmentSearchQuery.toLowerCase());
+                              const matchTitle = a.title && a.title.toLowerCase().includes(assignmentSearchQuery.toLowerCase());
+                              const matchWord = a.word && a.word.toLowerCase().includes(assignmentSearchQuery.toLowerCase());
+                              return matchTitle || matchWord;
                             })
-                            .map(a => (
-                              <label key={a.id} className="flex items-start gap-2 px-2 py-1.5 hover:bg-gray-700/60 rounded-lg cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedAssignmentIds.includes(a.id!)}
-                                  onChange={e => {
-                                    if (e.target.checked) {
-                                      setSelectedAssignmentIds(prev => [...prev, a.id!]);
-                                    } else {
-                                      setSelectedAssignmentIds(prev => prev.filter(x => x !== a.id));
-                                    }
-                                  }}
-                                  className="w-4 h-4 mt-0.5 rounded border-gray-600 bg-gray-900 text-purple-500 focus:ring-0"
-                                />
-                                <div className="min-w-0">
-                                  {a.title ? (
-                                    <>
-                                      <p className="font-bold text-white truncate">{a.title}</p>
-                                      <p className="font-mono text-gray-400 text-[11px] truncate">{a.word}</p>
-                                    </>
-                                  ) : (
-                                    <p className="font-mono text-white truncate">{a.word}</p>
-                                  )}
-                                </div>
-                              </label>
-                            ))}
+                            .map((a) => {
+                              const isChecked = selectedAssignmentIds.includes(a.id!);
+                              return (
+                                <label 
+                                  key={a.id}
+                                  className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs text-gray-200"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedAssignmentIds([...selectedAssignmentIds, a.id!]);
+                                      } else {
+                                        setSelectedAssignmentIds(selectedAssignmentIds.filter(id => id !== a.id));
+                                      }
+                                    }}
+                                    className="rounded bg-gray-900 border-gray-600 text-purple-600 focus:ring-0"
+                                  />
+                                  <div className="truncate">
+                                    {a.title && <span className="font-bold block">{a.title}</span>}
+                                    <span className="font-mono text-gray-400">{a.word}</span>
+                                  </div>
+                                </label>
+                              );
+                            })}
                         </div>
                       </div>
                     )}
@@ -444,67 +513,79 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                 </div>
               </th>
 
-              {/* Cột 3: Lần thử */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[90px]">
+              {/* Col 3: Time of Submission */}
+              <th scope="col" className="px-4 py-4 text-center min-w-[140px]">
+                <button 
+                  onClick={() => handleSort('time')}
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                  <span>{t('sub.th_time')}</span>
+                  {renderSortIcon('time')}
+                </button>
+              </th>
+
+              {/* Col 4: Attempt */}
+              <th scope="col" className="px-4 py-4 text-center">
                 <button 
                   onClick={() => handleSort('attempt')}
-                  className="inline-flex items-center gap-1 font-bold hover:text-white group cursor-pointer"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
                 >
                   <span>{t('sub.th_attempt')}</span>
                   {renderSortIcon('attempt')}
                 </button>
               </th>
 
-              {/* Cột 4: Điểm Âm vị */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[100px]">
+              {/* Col 5: Phonetics */}
+              <th scope="col" className="px-4 py-4 text-center">
                 <button 
                   onClick={() => handleSort('wav2vec')}
-                  className="inline-flex items-center gap-1 font-bold hover:text-white group cursor-pointer"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-blue-400"
                 >
                   <span>{t('sub.th_phoneme')}</span>
                   {renderSortIcon('wav2vec')}
                 </button>
               </th>
 
-              {/* Cột 5: Điểm Ngữ điệu */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[100px]">
+              {/* Col 6: Intonation */}
+              <th scope="col" className="px-4 py-4 text-center">
                 <button 
                   onClick={() => handleSort('dtw')}
-                  className="inline-flex items-center gap-1 font-bold hover:text-white group cursor-pointer"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-purple-400"
                 >
                   <span>{t('sub.th_intonation')}</span>
                   {renderSortIcon('dtw')}
                 </button>
               </th>
 
-              {/* Cột 6: Điểm Whisper */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[100px]">
+              {/* Col 7: Completeness */}
+              <th scope="col" className="px-4 py-4 text-center">
                 <button 
                   onClick={() => handleSort('whisper')}
-                  className="inline-flex items-center gap-1 font-bold hover:text-white group cursor-pointer"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-pink-400"
                 >
                   <span>{t('sub.th_whisper')}</span>
                   {renderSortIcon('whisper')}
                 </button>
               </th>
 
-              {/* Cột 7: Điểm Tổng kết */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[110px]">
+              {/* Col 8: Overall Score */}
+              <th scope="col" className="px-4 py-4 text-center">
                 <button 
                   onClick={() => handleSort('total')}
-                  className="inline-flex items-center gap-1 font-bold text-yellow-400 hover:text-yellow-300 group cursor-pointer"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-lime-400"
                 >
                   <span>{t('sub.th_total')}</span>
                   {renderSortIcon('total')}
                 </button>
               </th>
 
-              {/* Cột 8: Kết quả (Đạt / Chưa đạt) */}
+              {/* Col 9: Result Filter */}
               <th scope="col" className="px-5 py-4 text-center min-w-[130px]">
                 <div className="flex items-center justify-center gap-2">
                   <button 
                     onClick={() => handleSort('result')}
-                    className="flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
+                    className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
                   >
                     <span>{t('sub.th_result')}</span>
                     {renderSortIcon('result')}
@@ -523,44 +604,39 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                       <Filter className="w-3.5 h-3.5" />
                     </button>
 
-                    {/* Popover Filter Result Status */}
+                    {/* Popover Filter Result */}
                     {activePopover === 'status' && (
-                      <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl p-3 z-50 normal-case">
-                        <div className="space-y-1.5 text-xs">
-                          <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-700/60 rounded-lg cursor-pointer">
+                      <div className="absolute right-0 mt-2 w-44 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl p-3 z-50 normal-case">
+                        <div className="space-y-1.5">
+                          <label className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs text-green-400">
                             <input
                               type="checkbox"
                               checked={selectedStatuses.includes('passed')}
-                              onChange={e => {
+                              onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedStatuses(prev => [...prev, 'passed']);
+                                  setSelectedStatuses([...selectedStatuses, 'passed']);
                                 } else {
-                                  setSelectedStatuses(prev => prev.filter(x => x !== 'passed'));
+                                  setSelectedStatuses(selectedStatuses.filter(s => s !== 'passed'));
                                 }
                               }}
-                              className="w-4 h-4 rounded border-gray-600 bg-gray-900 text-green-500 focus:ring-0"
+                              className="rounded bg-gray-900 border-gray-600 text-green-600 focus:ring-0"
                             />
-                            <span className="text-green-400 font-bold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> {t('practice.status_passed')}
-                            </span>
+                            <span>{t('practice.status_passed')}</span>
                           </label>
-
-                          <label className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-700/60 rounded-lg cursor-pointer">
+                          <label className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs text-red-400">
                             <input
                               type="checkbox"
                               checked={selectedStatuses.includes('failed')}
-                              onChange={e => {
+                              onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedStatuses(prev => [...prev, 'failed']);
+                                  setSelectedStatuses([...selectedStatuses, 'failed']);
                                 } else {
-                                  setSelectedStatuses(prev => prev.filter(x => x !== 'failed'));
+                                  setSelectedStatuses(selectedStatuses.filter(s => s !== 'failed'));
                                 }
                               }}
-                              className="w-4 h-4 rounded border-gray-600 bg-gray-900 text-red-500 focus:ring-0"
+                              className="rounded bg-gray-900 border-gray-600 text-red-600 focus:ring-0"
                             />
-                            <span className="text-red-400 font-bold flex items-center gap-1">
-                              <XCircle className="w-3.5 h-3.5" /> {t('practice.status_failed')}
-                            </span>
+                            <span>{t('practice.status_failed')}</span>
                           </label>
                         </div>
                       </div>
@@ -569,45 +645,72 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                 </div>
               </th>
 
-              {/* Cột 9: Audio */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[80px]">
+              {/* Col 10: Listen Audio */}
+              <th scope="col" className="px-4 py-4 text-center">
                 {t('sub.th_listen')}
               </th>
             </tr>
           </thead>
 
-          <tbody className="divide-y divide-gray-800/80">
+          <tbody className="divide-y divide-gray-800">
             {sortedSubmissions.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                <td colSpan={10} className="px-6 py-12 text-center text-gray-500 font-medium">
                   {submissions.length === 0 ? t('sub.no_submissions') : t('sub.no_filter_match')}
                 </td>
               </tr>
             ) : (
-              sortedSubmissions.map((sub) => {
+              sortedSubmissions.map((sub, idx) => {
+                const subId = sub.id || `${sub.assignmentId}_${sub.studentId}_${sub.attemptNumber || idx}`;
                 const assignment = assignmentMap.get(sub.assignmentId);
-                const phonemeScore = sub.detailedScore?.wav2vec_score ?? sub.scores?.phoneme_score ?? 0;
-                const dtwScore = sub.detailedScore?.dtw_score ?? sub.scores?.dtw_score ?? 0;
-                const whisperScore = sub.detailedScore?.whisper_score ?? sub.scores?.whisper_score ?? 0;
-                
-                let totalScore = 0;
-                if (sub.detailedScore?.hybrid_target_score !== undefined) {
-                  totalScore = sub.detailedScore.hybrid_target_score > 1 
-                    ? sub.detailedScore.hybrid_target_score 
-                    : sub.detailedScore.hybrid_target_score * 100;
-                } else if (sub.scores?.total_score !== undefined) {
-                  totalScore = sub.scores.total_score * 100;
+
+                // Clean Integer Scores [0 - 100]
+                const rawTotal = sub.detailedScore?.hybrid_target_score !== undefined
+                  ? sub.detailedScore.hybrid_target_score
+                  : (sub.scores?.total_score !== undefined ? sub.scores.total_score : 0);
+                const totalScore = normalizeScore(rawTotal);
+
+                const rawPhoneme = sub.scores?.phoneme_score !== undefined
+                  ? sub.scores.phoneme_score
+                  : (sub.detailedScore?.wav2vec_raw_score !== undefined ? sub.detailedScore.wav2vec_raw_score : 0);
+                const phonemeScore = normalizeScore(rawPhoneme);
+
+                const rawDtw = sub.scores?.dtw_score !== undefined
+                  ? sub.scores.dtw_score
+                  : (sub.detailedScore?.dtw_score !== undefined ? sub.detailedScore.dtw_score : 0);
+                const dtwScore = normalizeScore(rawDtw);
+
+                const rawWhisper = sub.scores?.whisper_score !== undefined
+                  ? sub.scores.whisper_score
+                  : (sub.detailedScore?.whisper_raw_score !== undefined ? sub.detailedScore.whisper_raw_score : 0);
+                const whisperScore = normalizeScore(rawWhisper);
+
+                const isAudioPlaying = playingSubId === subId;
+                const isAudioLoading = loadingAudioId === subId;
+                const hasAudio = Boolean(sub.audioUrl || sub.audioStoragePath || (sub as any).audioPath);
+
+                // Format timestamp
+                let formattedTime = '-';
+                if (sub.createdAt?.toDate) {
+                  const d = sub.createdAt.toDate();
+                  formattedTime = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+                } else if (sub.createdAt?.seconds) {
+                  const d = new Date(sub.createdAt.seconds * 1000);
+                  formattedTime = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
                 }
 
                 return (
-                  <tr key={sub.id} className="hover:bg-gray-800/40 transition-colors">
-                    {/* 1. Email */}
-                    <td className="px-5 py-4 font-medium text-white truncate max-w-[220px]" title={sub.studentEmail}>
+                  <tr 
+                    key={subId} 
+                    className="hover:bg-gray-800/40 transition-colors border-b border-gray-800/60"
+                  >
+                    {/* 1. Student Email */}
+                    <td className="px-5 py-4 font-mono font-medium text-gray-200 truncate max-w-[220px]" title={sub.studentEmail}>
                       {sub.studentEmail}
                     </td>
 
                     {/* 2. Assignment / Word */}
-                    <td className="px-5 py-4 max-w-[220px]">
+                    <td className="px-5 py-4 max-w-[240px]">
                       {assignment?.title ? (
                         <div>
                           <p className="font-bold text-white truncate" title={assignment.title}>
@@ -624,32 +727,37 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                       )}
                     </td>
 
-                    {/* 3. Attempt */}
+                    {/* 3. Submitted At (Date & Time) */}
+                    <td className="px-4 py-4 text-center font-mono text-xs text-gray-400 whitespace-nowrap">
+                      {formattedTime}
+                    </td>
+
+                    {/* 4. Attempt */}
                     <td className="px-4 py-4 text-center font-mono text-gray-400">
                       {sub.attemptNumber ? `${sub.attemptNumber} / ${assignment?.maxAttempts || 3}` : '1'}
                     </td>
 
-                    {/* 4. Phoneme Score */}
-                    <td className="px-4 py-4 text-center font-mono font-bold text-blue-400 whitespace-nowrap">
-                      {phonemeScore > 1 ? phonemeScore.toFixed(1) : (phonemeScore * 100).toFixed(1)}%
+                    {/* 5. Phoneme Score */}
+                    <td className="px-4 py-4 text-center font-mono font-bold text-blue-400 whitespace-nowrap text-sm">
+                      {phonemeScore}
                     </td>
 
-                    {/* 5. DTW Score */}
-                    <td className="px-4 py-4 text-center font-mono text-gray-300 whitespace-nowrap">
-                      {dtwScore > 1 ? dtwScore.toFixed(1) : (dtwScore * 100).toFixed(1)}%
+                    {/* 6. DTW Score */}
+                    <td className="px-4 py-4 text-center font-mono text-purple-400 whitespace-nowrap text-sm">
+                      {dtwScore}
                     </td>
 
-                    {/* 6. Whisper Score */}
-                    <td className="px-4 py-4 text-center font-mono text-gray-300 whitespace-nowrap">
-                      {whisperScore > 1 ? whisperScore.toFixed(1) : (whisperScore * 100).toFixed(1)}%
+                    {/* 7. Whisper Score */}
+                    <td className="px-4 py-4 text-center font-mono text-pink-400 whitespace-nowrap text-sm">
+                      {whisperScore}
                     </td>
 
-                    {/* 7. Total Score */}
-                    <td className="px-4 py-4 text-center font-mono font-black text-lime-400 whitespace-nowrap">
-                      {totalScore.toFixed(1)}%
+                    {/* 8. Total Score */}
+                    <td className="px-4 py-4 text-center font-mono font-black text-lime-400 whitespace-nowrap text-base">
+                      {totalScore}
                     </td>
 
-                    {/* 8. Result Status (Protected Against Wrap) */}
+                    {/* 9. Result Status */}
                     <td className="px-5 py-4 text-center whitespace-nowrap">
                       {sub.isPassed ? (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/15 text-green-400 border border-green-500/30 whitespace-nowrap">
@@ -664,19 +772,29 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                       )}
                     </td>
 
-                    {/* 9. Audio Player */}
+                    {/* 10. Audio Player Button */}
                     <td className="px-4 py-4 text-center">
-                      {sub.audioUrl ? (
+                      {hasAudio ? (
                         <button
-                          onClick={() => handlePlayAudio(sub.audioUrl)}
-                          className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                            playingAudio === sub.audioUrl
-                              ? 'bg-blue-600 text-white border-blue-500 scale-105'
+                          type="button"
+                          onClick={() => handlePlayAudio(sub)}
+                          disabled={isAudioLoading}
+                          className={`p-2.5 rounded-xl border transition-all cursor-pointer inline-flex items-center justify-center ${
+                            isAudioPlaying
+                              ? 'bg-lime-400 text-gray-950 border-lime-400 shadow-md shadow-lime-400/30 scale-105 animate-pulse'
+                              : isAudioLoading
+                              ? 'bg-gray-800 text-lime-400 border-gray-700'
                               : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-700 hover:text-white'
                           }`}
-                          title={t('sub.th_listen')}
+                          title={isAudioPlaying ? 'Pause' : t('sub.th_listen')}
                         >
-                          <Volume2 className="w-4 h-4" />
+                          {isAudioLoading ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : isAudioPlaying ? (
+                            <Pause className="w-4 h-4 fill-current" />
+                          ) : (
+                            <Play className="w-4 h-4 fill-current ml-0.5" />
+                          )}
                         </button>
                       ) : (
                         <span className="text-gray-600 text-xs">-</span>

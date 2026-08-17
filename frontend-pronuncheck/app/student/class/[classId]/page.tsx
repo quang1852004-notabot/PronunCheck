@@ -168,7 +168,12 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       }
 
       // 1. Upload audio to Firebase Storage
-      const audioUrl = await uploadAudio(blob, classId, user.uid, assignmentId);
+      const { storagePath, downloadUrl } = await uploadAudio({
+        classId,
+        assignmentId,
+        studentId: user.uid,
+        blob
+      });
 
       // 2. Send to AI API
       const formData = new FormData();
@@ -220,7 +225,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
         word: expectedWord,
         targetPhoneme,
         attemptNumber: subs.length + 1,
-        audioUrl,
+        audioUrl: downloadUrl,
+        audioStoragePath: storagePath,
         isPassed: assessment.is_passed,
         scores: {
           phoneme_score: assessment.phoneme_score,
@@ -240,7 +246,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
         feedback: assessment.feedback,
         charScores,
         worstChar,
-        audioUrl,
+        audioUrl: downloadUrl,
         scores: {
           phoneme_score: assessment.phoneme_score,
           dtw_score: assessment.dtw_score,
@@ -250,9 +256,9 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       });
 
       if (assessment.is_passed) {
-        success('Chúc mừng! Bạn đã đạt bài tập này 🎉');
+        success(t('practice.completed_congrats'));
       } else {
-        toastError('Chưa đạt. Hãy nghe lại và thử lại nhé!');
+        toastError(t('practice.status_failed'));
       }
 
       // Reload assignments to refresh attempts count and history

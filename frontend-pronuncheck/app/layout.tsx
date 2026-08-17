@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/app/contexts/AuthContext";
 import { LanguageProvider } from "@/app/contexts/LanguageContext";
@@ -11,14 +11,18 @@ import { Analytics } from "@vercel/analytics/react";
 // Tat static prerendering - Firebase can browser APIs nen khong the chay server-side
 export const dynamic = "force-dynamic";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const plusJakartaSans = Plus_Jakarta_Sans({
+  variable: "--font-sans",
+  subsets: ["latin", "vietnamese", "latin-ext"],
+  display: "swap",
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
+  subsets: ["latin", "latin-ext"],
+  display: "swap",
+  weight: ["400", "600", "700"],
 });
 
 export const viewport: Viewport = {
@@ -48,10 +52,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
-      lang="vi"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased w-full max-w-full overflow-x-hidden`}
+      lang="en"
+      className={`${plusJakartaSans.variable} ${jetbrainsMono.variable} h-full antialiased w-full max-w-full overflow-x-hidden`}
     >
-      <body className="min-h-full flex flex-col w-full max-w-full overflow-x-hidden bg-gray-900 text-white selection:bg-lime-400 selection:text-gray-950">
+      <body className="min-h-full flex flex-col w-full max-w-full overflow-x-hidden bg-gray-900 text-white selection:bg-lime-400 selection:text-gray-950 font-sans">
         <LanguageProvider>
           <AuthProvider>
             <ToastProvider>
