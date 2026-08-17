@@ -189,33 +189,7 @@ export default function ClassManagement({
 
   return (
     <div className="space-y-6 select-none animate-in fade-in duration-200">
-      {/* 1. Quick Export Excel & General Header */}
-      <div className="bg-gradient-to-r from-emerald-950/60 to-gray-900 p-6 rounded-3xl border border-emerald-500/30 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shadow-lg shadow-emerald-500/10">
-            <FileSpreadsheet className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-lg font-black text-white">
-              {t('mgmt.export_title')}
-            </h3>
-            <p className="text-xs text-gray-300 mt-0.5">
-              {t('mgmt.export_desc')}
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleExportExcel}
-          className="px-6 py-3.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-gray-950 font-black text-sm rounded-2xl shadow-xl shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
-        >
-          <FileSpreadsheet className="w-4 h-4 fill-current" />
-          <span>{t('mgmt.export_btn')} (.xlsx)</span>
-        </button>
-      </div>
-
-      {/* 2. Grid: Class Settings (Name & Password) */}
+      {/* 1. Grid: Class Settings (Name & Password) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Box A: Edit Class Name */}
         <form onSubmit={handleSaveClassName} className="bg-gray-800/90 p-5 sm:p-6 rounded-3xl border border-gray-700/80 shadow-xl space-y-4 flex flex-col justify-between">
@@ -238,7 +212,7 @@ export default function ClassManagement({
                 value={className}
                 onChange={(e) => setClassName(e.target.value)}
                 className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white font-bold placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm font-sans"
-                placeholder="Nhập tên lớp học mới..."
+                placeholder={t('teacher.class_name_placeholder')}
               />
             </div>
           </div>

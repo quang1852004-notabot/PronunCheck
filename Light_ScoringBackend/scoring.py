@@ -90,14 +90,14 @@ def preprocess_denoise_audio(audio_array: np.ndarray, sr: int = 16000) -> np.nda
         return audio_array
         
     try:
-        # Áp dụng Spectral Gating khử ồn phi tĩnh (tiếng nhạc, quán cafe, quạt gió)
+        # Áp dụng Spectral Gating êm dịu: Khử ồn nền mà bảo toàn 100% hài âm tự nhiên của giọng nói
         cleaned = nr.reduce_noise(
             y=audio_array,
             sr=sr,
-            prop_decrease=0.75,
-            stationary=False,
-            n_fft=512,
-            hop_length=128
+            prop_decrease=0.40,
+            stationary=True,
+            n_fft=1024,
+            hop_length=256
         )
         return cleaned.astype(np.float32)
     except Exception as e:

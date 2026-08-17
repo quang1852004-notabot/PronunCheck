@@ -334,7 +334,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
 
           {/* Tab 3: Submissions Table */}
           <div className={activeTab === 'submissions' ? 'animate-in fade-in duration-200' : 'hidden'}>
-            <SubmissionTable submissions={submissions} assignments={assignments} />
+            <SubmissionTable submissions={submissions} assignments={assignments} classData={classData} />
           </div>
 
           {/* Tab 4: Class Management */}

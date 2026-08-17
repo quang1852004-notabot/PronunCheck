@@ -18,8 +18,7 @@ import {
   TrendingUp, 
   Users, 
   CheckCircle2, 
-  BarChart3,
-  Layers
+  BarChart3
 } from 'lucide-react';
 
 interface StudentAnalyticsDashboardProps {
@@ -79,7 +78,7 @@ export default function StudentAnalyticsDashboard({
     ? Math.round(filteredSubs.reduce((acc, s) => acc + normalizeScore(s.scores?.total_score ?? s.detailedScore?.hybrid_target_score), 0) / totalCount)
     : 0;
 
-  // 1. Score Distribution Data (4 tiers)
+  // 1. Score Distribution Data (4 tiers) with i18n
   const scoreDistributionData = useMemo(() => {
     let excellent = 0; // >= 85
     let good = 0;      // 70 - 84
@@ -95,22 +94,22 @@ export default function StudentAnalyticsDashboard({
     });
 
     return [
-      { name: 'Xuất sắc (85-100)', count: excellent, color: '#4ade80' },
-      { name: 'Khá (70-84)', count: good, color: '#60a5fa' },
-      { name: 'Trung bình (50-69)', count: fair, color: '#facc15' },
-      { name: 'Cần luyện thêm (<50)', count: needsWork, color: '#f87171' }
+      { name: t('analytics.tier_excellent'), count: excellent, color: '#4ade80' },
+      { name: t('analytics.tier_good'), count: good, color: '#60a5fa' },
+      { name: t('analytics.tier_fair'), count: fair, color: '#facc15' },
+      { name: t('analytics.tier_poor'), count: needsWork, color: '#f87171' }
     ];
-  }, [filteredSubs]);
+  }, [filteredSubs, t]);
 
-  // 2. Average Skills Breakdown Data
+  // 2. Average Skills Breakdown Data with i18n
   const skillsData = useMemo(() => {
     return [
-      { skill: 'Âm vị (Phonetics)', score: avgPhoneme, color: '#60a5fa' },
-      { skill: 'Ngữ điệu (Intonation)', score: avgDtw, color: '#c084fc' },
-      { skill: 'Tính trọn vẹn (Completeness)', score: avgWhisper, color: '#f472b6' },
-      { skill: 'Điểm tổng (Overall)', score: avgTotal, color: '#a3e635' }
+      { skill: t('practice.score_phonetics'), score: avgPhoneme, color: '#60a5fa' },
+      { skill: t('practice.score_intonation'), score: avgDtw, color: '#c084fc' },
+      { skill: t('practice.score_completeness'), score: avgWhisper, color: '#f472b6' },
+      { skill: t('practice.score_overall'), score: avgTotal, color: '#a3e635' }
     ];
-  }, [avgPhoneme, avgDtw, avgWhisper, avgTotal]);
+  }, [avgPhoneme, avgDtw, avgWhisper, avgTotal, t]);
 
   if (submissions.length === 0) return null;
 
@@ -140,14 +139,14 @@ export default function StudentAnalyticsDashboard({
           <select
             value={selectedAssignmentId}
             onChange={(e) => setSelectedAssignmentId(e.target.value)}
-            className="bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-400 cursor-pointer max-w-[220px] truncate"
+            className="bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-400 cursor-pointer max-w-[240px] truncate"
           >
-            <option value="all">{t('analytics.all_assignments')} ({submissions.length} bài nộp)</option>
+            <option value="all">{t('analytics.all_assignments')} ({submissions.length} {t('sub.submissions_count')})</option>
             {assignments.map((a) => {
               const count = submissions.filter(s => s.assignmentId === a.id).length;
               return (
                 <option key={a.id} value={a.id}>
-                  {a.title || a.word} ({count} bài nộp)
+                  {a.title || a.word} ({count} {t('sub.submissions_count')})
                 </option>
               );
             })}
@@ -168,7 +167,7 @@ export default function StudentAnalyticsDashboard({
                 {passRate}%
               </strong>
               <span className="text-xs text-gray-400">
-                ({passedCount} / {totalCount} bài Đạt)
+                ({passedCount} / {totalCount} {t('practice.status_passed')})
               </span>
             </div>
           </div>
@@ -206,7 +205,7 @@ export default function StudentAnalyticsDashboard({
                 {uniqueStudentsCount}
               </strong>
               <span className="text-xs text-gray-400">
-                học sinh ({totalCount} lượt làm)
+                {t('analytics.students_count')} ({totalCount} {t('sub.submissions_count')})
               </span>
             </div>
           </div>
@@ -226,26 +225,27 @@ export default function StudentAnalyticsDashboard({
               <span>{t('analytics.chart_score_dist')}</span>
             </h4>
             <span className="text-[11px] text-gray-400 font-mono">
-              Tổng {totalCount} bài nộp
+              {t('analytics.total_submissions')}: {totalCount}
             </span>
           </div>
 
           <div className="h-60 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={scoreDistributionData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+              <BarChart data={scoreDistributionData} margin={{ top: 10, right: 10, left: -20, bottom: 10 }}>
+                {/* Horizontal upright labels, straight alignment below each column */}
                 <XAxis 
                   dataKey="name" 
                   stroke="#9ca3af" 
-                  fontSize={10} 
+                  fontSize={11} 
                   tickLine={false} 
                   interval={0}
-                  angle={-15}
-                  textAnchor="end"
+                  textAnchor="middle"
+                  dy={6}
                 />
                 <YAxis stroke="#9ca3af" fontSize={11} tickLine={false} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#111827', borderColor: '#374151', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                  formatter={(value: any) => [`${value} bài nộp`, 'Số lượng']}
+                  formatter={(value: any) => [`${value} ${t('analytics.submissions_label')}`, t('analytics.total_submissions')]}
                 />
                 <Bar dataKey="count" radius={[8, 8, 0, 0]}>
                   {scoreDistributionData.map((entry, index) => (
@@ -265,7 +265,7 @@ export default function StudentAnalyticsDashboard({
               <span>{t('analytics.chart_skills_avg')}</span>
             </h4>
             <span className="text-[11px] text-gray-400 font-mono">
-              Thang điểm 0 - 100
+              {t('analytics.scale_100')}
             </span>
           </div>
 
@@ -277,13 +277,13 @@ export default function StudentAnalyticsDashboard({
                   dataKey="skill" 
                   type="category" 
                   stroke="#9ca3af" 
-                  fontSize={10} 
+                  fontSize={11} 
                   tickLine={false}
                   width={140}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#111827', borderColor: '#374151', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                  formatter={(value: any) => [`${value} / 100`, 'Điểm trung bình']}
+                  formatter={(value: any) => [`${value} / 100`, t('analytics.avg_score')]}
                 />
                 <Bar dataKey="score" radius={[0, 8, 8, 0]}>
                   {skillsData.map((entry, index) => (

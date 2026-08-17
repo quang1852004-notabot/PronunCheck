@@ -148,7 +148,7 @@ export default function ScoringConfigComponent({ classId, initialConfig, onSaved
               L0={L0}
               k={k}
               threshold={threshold}
-              activeL={simL}
+              highlightL={simL}
             />
 
             {/* Parameter Sliders */}

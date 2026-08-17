@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { SubmissionData, AssignmentData } from '@/app/lib/firestore';
+import { SubmissionData, AssignmentData, ClassData } from '@/app/lib/firestore';
 import { getAudioUrl } from '@/app/lib/storage';
+import { exportClassDataToExcel } from '@/app/lib/excelExport';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import { 
@@ -19,7 +20,8 @@ import {
   X, 
   CheckCircle2, 
   XCircle,
-  Calendar
+  Calendar,
+  FileSpreadsheet
 } from 'lucide-react';
 
 import StudentAnalyticsDashboard from '@/app/teacher/components/StudentAnalyticsDashboard';
@@ -27,6 +29,7 @@ import StudentAnalyticsDashboard from '@/app/teacher/components/StudentAnalytics
 interface SubmissionTableProps {
   submissions: SubmissionData[];
   assignments: AssignmentData[];
+  classData?: ClassData | null;
 }
 
 type SortField = 'email' | 'word' | 'time' | 'attempt' | 'wav2vec' | 'dtw' | 'whisper' | 'total' | 'result';
@@ -58,9 +61,25 @@ function getSubmissionTimestamp(sub: SubmissionData): number {
   return 0;
 }
 
-export default function SubmissionTable({ submissions, assignments }: SubmissionTableProps) {
+export default function SubmissionTable({ submissions, assignments, classData }: SubmissionTableProps) {
   const { t } = useLanguage();
-  const { error: toastError } = useToast();
+  const { success, error: toastError } = useToast();
+
+  // Handle Export Excel
+  const handleExportExcel = () => {
+    try {
+      exportClassDataToExcel({
+        classData: classData || { name: 'Class', teacherId: '', teacherEmail: '' },
+        assignments,
+        submissions,
+        members: []
+      });
+      success(t('mgmt.excel_exported'));
+    } catch (err) {
+      console.error('Export excel error:', err);
+      toastError('Lỗi khi xuất file Excel');
+    }
+  };
 
   // Audio Playback State
   const [playingSubId, setPlayingSubId] = useState<string | null>(null);
@@ -310,13 +329,24 @@ export default function SubmissionTable({ submissions, assignments }: Submission
 
       {/* 2. Top Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-900/80 p-4 rounded-2xl border border-gray-700/80">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
             <span>📈</span> {t('sub.title')}
           </h3>
-          <span className="text-xs bg-blue-500/20 text-blue-400 font-bold px-2.5 py-1 rounded-full border border-blue-500/30">
+          <span className="text-xs bg-blue-500/20 text-blue-400 font-bold px-2.5 py-1 rounded-full border border-blue-500/30 font-mono">
             {sortedSubmissions.length} / {submissions.length} {t('sub.submissions_count')}
           </span>
+
+          {/* Compact Excel Export Button */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            className="px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/30 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer active:scale-95 ml-1"
+            title={t('mgmt.export_btn')}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>.xlsx</span>
+          </button>
         </div>
 
         {hasActiveFilters && (

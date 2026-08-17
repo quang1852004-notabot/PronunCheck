@@ -6,7 +6,6 @@ import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import AudioLevelMeter from '@/app/components/AudioLevelMeter';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
-import { createRnnoiseNode } from '@/app/lib/rnnoise';
 
 interface AudioRecorderProps {
   onAudioReady: (blob: Blob) => void;
@@ -123,7 +122,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
   const startRecording = async () => {
     try {
-      // 1. Tận dụng hoặc xin quyền stream với WebRTC Audio Constraints
+      // 1. Kích hoạt stream với WebRTC Audio DSP Constraints chuẩn
       let stream = previewStream;
       if (!stream || !stream.active) {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -138,9 +137,9 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
       
       streamRef.current = stream;
       setActiveStream(stream);
-      stopPreviewStream(); // Tắt chế độ preview độc lập để vào ghi âm chính thức
+      stopPreviewStream(); // Tắt preview độc lập để chuyển sang ghi âm
 
-      // 2. Thiết lập Web Audio API DSP + RNNoise AI Worklet Pipeline
+      // 2. Web Audio API Transparent Pipeline (High-Pass 80Hz nhẹ nhàng, loại bỏ Compressor gây méo tiếng)
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx();
       audioContextRef.current = audioCtx;
@@ -151,44 +150,23 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
       const sourceNode = audioCtx.createMediaStreamSource(stream);
 
-      // High-Pass Filter 85Hz: Cắt rung quạt / ù điện lưới
+      // High-Pass Filter 80Hz: Cắt rung quạt / ù điện lưới mà bảo toàn 100% độ ấm & tự nhiên của giọng nói
       const highPassFilter = audioCtx.createBiquadFilter();
       highPassFilter.type = 'highpass';
-      highPassFilter.frequency.value = 85;
-      highPassFilter.Q.value = 0.707;
-
-      // Dynamics Compressor: Chống rè vỡ âm (clipping)
-      const compressor = audioCtx.createDynamicsCompressor();
-      compressor.threshold.value = -18;
-      compressor.knee.value = 20;
-      compressor.ratio.value = 4;
-      compressor.attack.value = 0.003;
-      compressor.release.value = 0.15;
+      highPassFilter.frequency.value = 80;
+      highPassFilter.Q.value = 0.5; // Bộ lọc Q nhẹ, không gây méo pha
 
       const destination = audioCtx.createMediaStreamDestination();
+      sourceNode.connect(highPassFilter);
+      highPassFilter.connect(destination);
 
-      // Nạp mô hình RNNoise AI (WASM AudioWorklet)
-      const rnnoiseNode = await createRnnoiseNode(audioCtx);
-
-      if (rnnoiseNode) {
-        // Luồng lọc ồn AI: Mic -> RNNoise AI -> HighPass -> Compressor -> Destination
-        sourceNode.connect(rnnoiseNode);
-        rnnoiseNode.connect(highPassFilter);
-      } else {
-        // Luồng fallback DSP: Mic -> HighPass -> Compressor -> Destination
-        sourceNode.connect(highPassFilter);
-      }
-
-      highPassFilter.connect(compressor);
-      compressor.connect(destination);
-
-      // Sử dụng stream đã qua lọc ồn AI để ghi âm
+      // Sử dụng stream đã lọc ù gió để ghi âm
       const recordStream = destination.stream && destination.stream.getAudioTracks().length > 0
         ? destination.stream
         : stream;
 
-      // Xác định định dạng ghi âm tối ưu
-      let options = {};
+      // Xác định định dạng ghi âm chất lượng cao (128kbps)
+      let options: MediaRecorderOptions = {};
       let mimeType = '';
       if (typeof MediaRecorder.isTypeSupported === 'function') {
         const types = [
@@ -200,7 +178,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         ];
         for (const tType of types) {
           if (MediaRecorder.isTypeSupported(tType)) {
-            options = { mimeType: tType };
+            options = { mimeType: tType, audioBitsPerSecond: 128000 };
             mimeType = tType;
             break;
           }
@@ -338,7 +316,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
             <div className="flex items-center gap-1 text-[11px] font-semibold text-lime-400 bg-lime-950/60 border border-lime-800/60 px-2.5 py-1 rounded-full">
               <Sparkles className="w-3 h-3 text-lime-400" />
-              <span>RNNoise AI: Bật</span>
+              <span>Khử ồn tự nhiên: Bật</span>
             </div>
 
             <div className="flex items-center gap-1.5 font-mono text-base font-extrabold text-white bg-gray-950 px-3.5 py-1 rounded-full border border-gray-800 shadow-inner">

@@ -18,7 +18,7 @@ export default function AudioLevelMeter({
   onClosePreview,
 }: AudioLevelMeterProps) {
   const { t } = useLanguage();
-  const [displayedLevel, setDisplayedLevel] = useState(0); // 0 to 100 (Throttled 800ms)
+  const [displayedLevel, setDisplayedLevel] = useState(0); // 0 to 100 (Throttled 400ms)
   const barCount = mode === 'preview' ? 24 : 16;
   const [frequencies, setFrequencies] = useState<number[]>(new Array(barCount).fill(6));
   const [noiseStatus, setNoiseStatus] = useState<'quiet' | 'optimal' | 'noisy'>('optimal');
@@ -82,9 +82,9 @@ export default function AudioLevelMeter({
         // Vạch sóng đồ họa cập nhật mượt mà theo từng frame
         setFrequencies(barValues);
 
-        // Throttle: Chỉ cập nhật con số phần trăm và trạng thái mỗi 800ms một lần
+        // Throttle: Chỉ cập nhật con số phần trăm và trạng thái mỗi 400ms một lần
         const now = performance.now();
-        if (now - lastThrottleTimeRef.current >= 800) {
+        if (now - lastThrottleTimeRef.current >= 400) {
           lastThrottleTimeRef.current = now;
           const currentSmooth = Math.round(smoothedLevelRef.current);
           setDisplayedLevel(currentSmooth);
@@ -155,7 +155,7 @@ export default function AudioLevelMeter({
           </div>
         </div>
 
-        {/* Dynamic Status Banner (Throttled 800ms) */}
+        {/* Dynamic Status Banner (Throttled 400ms) */}
         <div className="flex items-center justify-between text-xs px-1">
           <div className="flex items-center gap-1.5 font-bold">
             {displayedLevel < 5 ? (
@@ -163,7 +163,7 @@ export default function AudioLevelMeter({
             ) : (
               <Volume2 className="w-4 h-4 text-cyan-400" />
             )}
-            <span className="text-gray-300">Tín hiệu vào: <strong className="text-white font-mono text-sm">{displayedLevel}%</strong></span>
+            <span className="text-gray-300">Âm thanh vào: <strong className="text-white font-mono text-sm">{displayedLevel}%</strong></span>
           </div>
 
           <div>
