@@ -2,14 +2,22 @@
 venv/
 env/
 .env
+.env.*
 
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Node
+# Node & Next.js
 node_modules/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.next/
+out/
+next-env.d.ts
 
 # Temp directories for audio
 temp/
@@ -20,16 +28,28 @@ test/
 .DS_Store
 Thumbs.db
 
-# SSH Keys
-github_deploy_key*
-
-# Secrets and Caches
-google_key.json
-*key*.json
-pronuncheck-*.json
+# SSH Keys & Deployment Secrets
+github_deploy*
+*deploy_key*
+id_rsa*
+id_ed25519*
+*.pub
 *.pem
 *.key
+*.ppk
+*.crt
+
+# Google Cloud Service Account & API Keys
+google_key.json
+*key*.json
+*secret*.json
+*credential*.json
+pronuncheck-*.json
+gcp-*.json
+firebase-adminsdk-*.json
+
+# Audio cache & Local storage
 reference_audio/
 
 # Internal context files
-roadmap.md  
+roadmap.md
