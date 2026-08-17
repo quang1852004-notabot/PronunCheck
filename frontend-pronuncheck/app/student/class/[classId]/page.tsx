@@ -254,7 +254,14 @@ function ClassPageContent({ classId }: { classId: string }) {
                   }}
                 >
                   <div>
-                    <h3 className="text-3xl font-bold text-white mb-2">{assignment.word}</h3>
+                    {assignment.title ? (
+                      <>
+                        <h3 className="text-2xl font-bold text-white mb-1">{assignment.title}</h3>
+                        <p className="text-lg font-mono text-lime-400 font-bold mb-2">{assignment.word}</p>
+                      </>
+                    ) : (
+                      <h3 className="text-3xl font-bold text-white mb-2">{assignment.word}</h3>
+                    )}
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400">
                       <span className="bg-gray-700 px-2 py-1 rounded-md">Âm mục tiêu: <strong className="text-lime-400">{assignment.targetPhoneme}</strong></span>
                       <span>Còn lại: {remainingAttempts}/{assignment.maxAttempts} lượt</span>

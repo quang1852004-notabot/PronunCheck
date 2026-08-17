@@ -6,6 +6,7 @@ import {
   getDocs, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   query, 
   where, 
   serverTimestamp,
@@ -32,6 +33,7 @@ export interface ClassData {
 export interface AssignmentData {
   id?: string;
   classId?: string;
+  title?: string;
   word: string;
   targetPhoneme: string;
   maxAttempts: number;
@@ -98,6 +100,20 @@ export async function createAssignment(classId: string, assignment: Omit<Assignm
     createdAt: serverTimestamp()
   });
   return ref.id;
+}
+
+export async function updateAssignment(
+  classId: string, 
+  assignmentId: string, 
+  data: Partial<Omit<AssignmentData, 'id' | 'classId'>>
+): Promise<void> {
+  const docRef = doc(db, `classes/${classId}/assignments`, assignmentId);
+  await updateDoc(docRef, data);
+}
+
+export async function deleteAssignment(classId: string, assignmentId: string): Promise<void> {
+  const docRef = doc(db, `classes/${classId}/assignments`, assignmentId);
+  await deleteDoc(docRef);
 }
 
 export async function updateScoringConfig(classId: string, config: ScoringConfig): Promise<void> {

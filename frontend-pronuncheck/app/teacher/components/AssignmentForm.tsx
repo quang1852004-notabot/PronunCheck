@@ -10,6 +10,7 @@ interface AssignmentFormProps {
 }
 
 export default function AssignmentForm({ classId, onCreated }: AssignmentFormProps) {
+  const [title, setTitle] = useState('');
   const [word, setWord] = useState('');
   const [targetPhoneme, setTargetPhoneme] = useState('');
   const [maxAttempts, setMaxAttempts] = useState(3);
@@ -22,12 +23,14 @@ export default function AssignmentForm({ classId, onCreated }: AssignmentFormPro
     setLoading(true);
     try {
       await createAssignment(classId, {
-        word,
-        targetPhoneme,
+        title: title.trim() || undefined,
+        word: word.trim(),
+        targetPhoneme: targetPhoneme.trim() || 'auto',
         maxAttempts,
         deadline: deadline ? Timestamp.fromDate(new Date(deadline)) : null,
         isActive
       });
+      setTitle('');
       setWord('');
       setTargetPhoneme('');
       setMaxAttempts(3);
@@ -44,67 +47,93 @@ export default function AssignmentForm({ classId, onCreated }: AssignmentFormPro
 
   return (
     <form onSubmit={handleSubmit} className="bg-gray-900 p-6 rounded-2xl border border-gray-700 space-y-4">
-      <h3 className="text-xl font-bold mb-4">Tạo bài tập mới</h3>
+      <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+        <span className="text-blue-400">📝</span> Tạo bài tập mới
+      </h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-300 mb-1">
+            Tên bài tập <span className="text-xs text-gray-500 font-normal">(Tùy chọn - Giúp hiển thị gọn gàng trong danh sách)</span>
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            placeholder="VD: Bài 1 - Luyện đếm số từ 1 đến 10"
+          />
+        </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-400 mb-1">Từ cần đọc *</label>
+          <label className="block text-sm font-medium text-gray-300 mb-1">Từ / Câu cần đọc *</label>
           <input
             type="text"
             required
             value={word}
             onChange={e => setWord(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-            placeholder="VD: Schule"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            placeholder="VD: Schule hoặc eins zwei drei..."
           />
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-400 mb-1">Phoneme mục tiêu *</label>
+          <label className="block text-sm font-medium text-gray-300 mb-1">
+            Phoneme mục tiêu * <span className="text-xs text-gray-500 font-normal">(nhập &#39;auto&#39; nếu là câu dài)</span>
+          </label>
           <input
             type="text"
             required
             value={targetPhoneme}
             onChange={e => setTargetPhoneme(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-            placeholder="VD: ʃ"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            placeholder="VD: ʃ hoặc sch hoặc auto"
           />
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-400 mb-1">Số lần thử tối đa</label>
+          <label className="block text-sm font-medium text-gray-300 mb-1">Số lần thử tối đa</label>
           <input
             type="number"
             min={1}
             required
             value={maxAttempts}
             onChange={e => setMaxAttempts(Number(e.target.value))}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           />
         </div>
+
         <div>
-          <label className="block text-sm font-medium text-gray-400 mb-1">Hạn chót</label>
+          <label className="block text-sm font-medium text-gray-300 mb-1">
+            Hạn chót <span className="text-xs text-gray-500 font-normal">(để trống nếu không giới hạn)</span>
+          </label>
           <input
             type="datetime-local"
             value={deadline}
             onChange={e => setDeadline(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           />
         </div>
-        <div className="md:col-span-2 flex items-center space-x-2">
+
+        <div className="md:col-span-2 flex items-center space-x-2 pt-1">
           <input
             type="checkbox"
             id="isActive"
             checked={isActive}
             onChange={e => setIsActive(e.target.checked)}
-            className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900"
+            className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
           />
-          <label htmlFor="isActive" className="text-sm font-medium text-gray-400">Đang mở (Học sinh có thể làm)</label>
+          <label htmlFor="isActive" className="text-sm font-medium text-gray-300 cursor-pointer">
+            Đang mở (Học sinh có thể nhìn thấy và làm bài)
+          </label>
         </div>
       </div>
+
       <button
         type="submit"
         disabled={loading}
-        className="w-full mt-4 px-4 py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white font-medium rounded-lg transition-colors shadow-lg shadow-blue-500/30"
+        className="w-full mt-4 px-4 py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-500/25 cursor-pointer"
       >
-        {loading ? 'Đang tạo...' : 'Tạo bài tập'}
+        {loading ? 'Đang tạo...' : '+ Tạo bài tập mới'}
       </button>
     </form>
   );

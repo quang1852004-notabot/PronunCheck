@@ -34,13 +34,7 @@ export default function TeacherDashboard() {
     }
   }, [userRole, router]);
 
-  useEffect(() => {
-    if (user) {
-      loadClasses();
-    }
-  }, [user]);
-
-  const loadClasses = async () => {
+  const loadClasses = React.useCallback(async () => {
     if (!user) return;
     try {
       const data = await getClassesByTeacher(user.uid);
@@ -50,7 +44,13 @@ export default function TeacherDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      loadClasses();
+    }
+  }, [user, loadClasses]);
 
   const handleLogout = async () => {
     await logout();
