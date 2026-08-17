@@ -52,23 +52,42 @@ WHISPER_CPU_THREADS = 4
 # Số worker nội bộ của Faster-Whisper
 WHISPER_NUM_WORKERS = 1
 
-# Số luồng chạy song song 2 mô hình AI (Wav2Vec2 + Whisper) trong 1 request
-# Khuyến nghị: 2 (vì có 2 mô hình chạy đồng thời)
-PARALLEL_AI_WORKERS = 2
+# Số luồng chạy song song các mô hình AI trong 1 request
+PARALLEL_AI_WORKERS = 3
 
 
 # ==============================================================================
-# 3. CẤU HÌNH MÔ HÌNH AI
+# 3. CẤU HÌNH MÔ HÌNH AI (LIGHT TIER)
 # ==============================================================================
-# Kích thước mô hình Whisper: "tiny", "base", "small", "medium", "large-v3"
-WHISPER_MODEL_NAME = "base"
+# Kích thước mô hình Whisper: "tiny" (~39MB, siêu nhẹ, nhận diện nhanh)
+WHISPER_MODEL_NAME = "tiny"
 
 # Mô hình Wav2Vec2 cho nhận diện ngữ âm tiếng Đức
 WAV2VEC_MODEL_NAME = "facebook/wav2vec2-large-xlsr-53-german"
 
 
 # ==============================================================================
-# 4. CẤU HÌNH LƯU TRỮ VÀ TẢI FILE
+# 4. CẤU HÌNH F0 PITCH CONTOUR & DTW (INTONATION & PROSODY)
+# ==============================================================================
+F0_FMIN = 65.0          # Tần số thấp nhất giọng người (C2)
+F0_FMAX = 2093.0        # Tần số cao nhất giọng người (C7)
+F0_HOP_LENGTH = 512
+DTW_PITCH_DECAY = 0.08  # Hệ số suy giảm khoảng cách DTW cao độ
+
+
+# ==============================================================================
+# 5. CẤU HÌNH THUẬT TOÁN CHẤM ĐIỂM ĐỘNG (DYNAMIC SCORING SPECIFICATION)
+# ==============================================================================
+# Trọng số Sigmoid theo độ dài hiệu dụng L:
+# w_acc(L) = 1 / (1 + exp(k * (L - L0)))
+# w_flu(L) = 1 - w_acc(L)
+SCORING_L0 = 4.0        # Điểm chuyển giao cân bằng (4 từ/âm tiết hiệu dụng)
+SCORING_K = 0.5         # Độ dốc chuyển tiếp
+PASSING_THRESHOLD = 55.0 # Điểm qua môn (trên thang 100)
+
+
+# ==============================================================================
+# 6. CẤU HÌNH LƯU TRỮ VÀ TẢI FILE
 # ==============================================================================
 UPLOAD_DIR = "temp_audio"
 REFERENCE_AUDIO_DIR = "reference_audio"

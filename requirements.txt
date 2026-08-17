@@ -8,3 +8,5 @@ faster-whisper
 librosa
 fastdtw
 google-cloud-texttospeech
+gTTS
+soundfile

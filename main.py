@@ -6,9 +6,9 @@ Dự án: DT3_PronunCheck
 Mục đích:
   - Cung cấp REST API đánh giá phát âm tiếng Đức (/api/v1/assess).
   - Tích hợp mô hình Hybrid AI chạy song song đa luồng (ThreadPoolExecutor):
-      1. Wav2Vec2 (CTC Forced Alignment / Phoneme-level scoring)
-      2. Faster-Whisper (ASR word-level transcription & confidence)
-      3. FastDTW (Dynamic Time Warping so sánh với audio chuẩn Google TTS)
+      1. Wav2Vec2 (CTC Forced Alignment / Phoneme-level scoring + German Phonetics)
+      2. Faster-Whisper Tiny (ASR word-level completeness factor x_soft)
+      3. F0 + FastDTW (Pitch contour intonation matching với Google TTS)
   - Tổng hợp kết quả và trả về điểm số chi tiết từng ký tự/âm tiết cho Frontend.
 ================================================================================
 """
@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
 import uuid
+import numpy as np
 import torch
 from concurrent.futures import ThreadPoolExecutor
 import uvicorn
@@ -52,9 +53,9 @@ executor = ThreadPoolExecutor(max_workers=config.PARALLEL_AI_WORKERS)
 # ==============================================================================
 # 2. KHỞI TẠO CÁC MÔ HÌNH AI (GLOBAL INSTANCES)
 # ==============================================================================
-print(f"Loading AI models on {config.DEVICE.upper()}...")
+print(f"Loading AI models on {config.DEVICE.upper()} (Light Tier Mode)...", flush=True)
 
-# 2.1. Tải mô hình Faster-Whisper (nhận diện văn bản ASR & xác suất từ ngữ)
+# 2.1. Tải mô hình Faster-Whisper Tiny (nhận diện nhanh & tiết kiệm RAM)
 try:
     whisper_model = WhisperModel(
         config.WHISPER_MODEL_NAME,
@@ -63,8 +64,9 @@ try:
         cpu_threads=config.WHISPER_CPU_THREADS,
         num_workers=config.WHISPER_NUM_WORKERS
     )
+    print("Faster-Whisper Tiny loaded successfully.", flush=True)
 except Exception as e:
-    print(f"Error loading Faster-Whisper: {e}")
+    print(f"Error loading Faster-Whisper: {e}", flush=True)
     whisper_model = None
 
 # 2.2. Tải mô hình Wav2Vec2 (phân tích âm vị / ký tự chi tiết qua CTC logits)
@@ -73,8 +75,9 @@ try:
     w2v_model = Wav2Vec2ForCTC.from_pretrained(config.WAV2VEC_MODEL_NAME).to(config.DEVICE)
     w2v_model.eval()  # Chuyển sang chế độ inference (không tính gradient)
     vocab_dict = w2v_processor.tokenizer.get_vocab()
+    print("Wav2Vec2 model loaded successfully.", flush=True)
 except Exception as e:
-    print(f"Error loading Wav2Vec2: {e}")
+    print(f"Error loading Wav2Vec2: {e}", flush=True)
     w2v_processor, w2v_model, vocab_dict = None, None, None
 
 
@@ -87,7 +90,20 @@ async def lifespan(app: FastAPI):
     Quản lý vòng đời khởi động/tắt của FastAPI app.
     Warm-up model giúp request đầu tiên của người dùng không bị trễ/lag.
     """
-    print("Warming up AI models...", flush=True)
+    print("Warming up AI models with dummy inference...", flush=True)
+    try:
+        dummy_audio = np.zeros(16000, dtype=np.float32)
+        if whisper_model:
+            list(whisper_model.transcribe(dummy_audio, language="de", beam_size=1)[0])
+        if w2v_model and w2v_processor:
+            inputs = w2v_processor(dummy_audio, sampling_rate=16000, return_tensors="pt").to(config.DEVICE)
+            with torch.inference_mode():
+                _ = w2v_model(**inputs).logits
+        scoring.extract_f0_semitones(dummy_audio, sr=16000)
+        print("AI Models warm-up complete!", flush=True)
+    except Exception as e:
+        print(f"Warm-up warning: {e}", flush=True)
+
     yield
     print("Shutting down backend service...", flush=True)
 
@@ -96,8 +112,8 @@ async def lifespan(app: FastAPI):
 # 4. KHỞI TẠO FASTAPI APP & CORS MIDDLEWARE
 # ==============================================================================
 app = FastAPI(
-    title="Advanced Pronunciation Assessment",
-    version="3.1",
+    title="PronunCheck Light Scoring Service",
+    version="3.5",
     lifespan=lifespan
 )
 
@@ -117,7 +133,7 @@ app.add_middleware(
 @app.post("/api/v1/assess")
 def assess_pronunciation(
     audio_file: UploadFile = File(..., description="File âm thanh ghi âm từ microphone của học sinh"),
-    expected_word: str = Form("Schule", description="Từ mục tiêu cần phát âm (ví dụ: Schule, Tisch...)")
+    expected_word: str = Form("Schule", description="Từ hoặc câu mục tiêu cần phát âm")
 ):
     """
     Endpoint chính xử lý file âm thanh và trả về kết quả đánh giá phát âm:
@@ -126,11 +142,11 @@ def assess_pronunciation(
       1. Lưu file audio tạm thời vào UPLOAD_DIR với UUID ngẫu nhiên.
       2. Decode file audio về mảng numpy 1D tần số lấy mẫu 16kHz chuẩn.
       3. Gửi đồng thời 3 tác vụ tính điểm vào ThreadPoolExecutor (non-blocking):
-         - analyze_precise_score (Wav2Vec2 alignment)
-         - analyze_with_whisperx (Whisper ASR)
-         - calculate_dtw_score (DTW với Google TTS audio mẫu)
-      4. Chờ cả 3 tác vụ hoàn thành (.result()), lấy điểm và nhận diện âm lỗi nhất (worst_char).
-      5. Gọi hàm calculate_dynamic_score để tổng hợp điểm số cuối cùng kèm lời khuyên.
+         - analyze_precise_score (Wav2Vec2 CTC alignment + German phonetics)
+         - analyze_with_whisperx (Whisper Tiny ASR + soft completeness)
+         - calculate_dtw_score (F0 Pitch DTW intonation matching)
+      4. Chờ cả 3 tác vụ hoàn thành (.result()).
+      5. Gọi hàm calculate_dynamic_score với công thức trọng số Sigmoid động.
       6. Khối `finally` đảm bảo xóa file audio tạm để giải phóng ổ cứng.
     """
     file_path = ""
@@ -165,9 +181,14 @@ def assess_pronunciation(
         whisper_score = future_whisper.result()
         dtw_score = future_dtw.result()
 
-        # 5. Tính toán điểm số tổng hợp động và nhận xét
+        # 5. Tính toán điểm số tổng hợp động và nhận xét sư phạm
         assessment_result = scoring.calculate_dynamic_score(
-            precise_score, whisper_score, dtw_score, expected_word, worst_char
+            precise_score=precise_score,
+            whisper_score=whisper_score,
+            dtw_score=dtw_score,
+            expected_text=expected_word,
+            worst_char_info=worst_char,
+            char_scores=char_scores
         )
 
         # 6. Trả về JSON Response cho client
@@ -197,4 +218,3 @@ def assess_pronunciation(
 # ==============================================================================
 if __name__ == "__main__":
     uvicorn.run("main:app", host=config.HOST, port=config.PORT, workers=config.WORKERS)
-

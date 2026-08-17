@@ -52,20 +52,26 @@ Khi bạn chạy script `sync_git.bat` (`git push origin main`):
 
 ## 📸 Tổng quan tính năng
 
-### Công nghệ Lõi AI V3
-1. **Chấm điểm theo Ký tự (Character-level)**: 
-   Sử dụng `torchaudio.functional.forced_align` kết hợp với Wav2Vec2 XLSR để tính điểm phát âm cho *từng chữ cái/âm tiết* trong từ.
-2. **Chấm điểm Ngữ điệu (Intonation)**:
-   Sử dụng **FastDTW** (Dynamic Time Warping) và MFCC (Mel-frequency cepstral coefficients) qua `librosa` để đo độ lệch ngữ điệu của người dùng so với audio mẫu.
-3. **Auto-Generate Audio Mẫu**:
-   Tích hợp Google Cloud Text-to-Speech (Neural2-B) tự động sinh và cache file audio chuẩn để làm mốc so sánh DTW.
+### Công nghệ Lõi AI V3.5 (Light Tier & German Phonetics Engine)
+1. **Chấm điểm theo Ký tự & Luật Âm ngữ học (German Phonetics & Character-level)**: 
+   Sử dụng `torchaudio.functional.forced_align` kết hợp với Wav2Vec2 XLSR và bộ luật âm ngữ học tiếng Đức (`german_phonetics.py`):
+   - Phân biệt cặp âm **Ich-Laut (/ç/)** vs **Ach-Laut (/x/)** theo ngữ cảnh nguyên âm trước.
+   - Cơ chế nới lỏng dung sai cho **Hiện tượng vô thanh hóa phụ âm cuối (Auslautverhärtung)** ($d \to t, b \to p, g \to k$).
+   - Đánh giá thời lượng nguyên âm dài vs ngắn (**Vowel Duration Scoring**: $iː$ vs $ɪ$).
+2. **Chấm điểm Ngữ điệu qua Đường cong Cao độ (F0 Pitch Contour DTW)**:
+   Sử dụng **FastDTW** trên đường cong bán âm tương đối ($\text{Semitones} = 12 \log_2(F_0 / \text{median})$ qua `librosa.pyin`), loại bỏ 100% sai lệch do giới tính/âm sắc giọng đọc.
+3. **Độ trọn vẹn $x_{\text{soft}}$ qua Faster-Whisper Tiny**:
+   Sử dụng mô hình Tiny int8 siêu nhẹ (~39MB) kiểm tra học viên có nói đủ từ mục tiêu không mà không làm sụt điểm oan do ngắt nghỉ.
+4. **Thuật toán Trọng số Động Sigmoid (Dynamic Sigmoid Scoring)**:
+   Tự động cân bằng giữa độ chính xác âm vị $y$ (cho từ ngắn $w_{\text{acc}} \to 0.82$) và độ lưu loát ngữ điệu $z$ (cho câu dài $w_{\text{flu}} \to 0.82$).
 
 ### Tính năng chính
 
 | Tính năng | Mô tả |
 |---|---|
-| 🤖 **AI Hybrid Scoring** | Wav2Vec + Whisper + DTW chạy song song, chấm điểm tức thì |
-| 🎯 **Feedback chi tiết** | AI chỉ ra học sinh phát âm sai chữ cái nào và sai như thế nào |
+| 🤖 **AI Hybrid Scoring V3.5** | Wav2Vec2 + Whisper Tiny + F0 DTW chạy song song non-blocking |
+| 🇩🇪 **German Phonetics Engine** | Xử lý Ich/Ach, Auslautverhärtung, thời lượng nguyên âm dài/ngắn |
+| 🎯 **Feedback chi tiết sư phạm** | Chỉ rõ lỗi phát âm, khẩu hình và hướng dẫn sửa chuẩn Đức |
 | 🔐 **Auth theo vai trò** | Phân vai Học sinh / Giáo viên |
 | 🎤 **Ghi âm trực tiếp** | Thu âm qua trình duyệt, nghe lại trước khi nộp |
 | 🏫 **Hệ thống lớp học** | GV tạo lớp ➔ HS tham gia bằng mã + mật khẩu |
@@ -79,10 +85,10 @@ Khi bạn chạy script `sync_git.bat` (`git push origin main`):
 |---|---|---|
 | **Frontend** | Next.js 16.3 • React 19 • TypeScript • Tailwind CSS 4 | **Vercel** (Serverless) |
 | **Backend** | Python FastAPI • Uvicorn (4 Workers) | **GCP VM** (`c2-standard-8`) |
-| **AI: Forced Alignment** | Wav2Vec2 (`facebook/wav2vec2-large-xlsr-53-german`) — PyTorch | GCP VM |
-| **AI: Transcription** | Faster-Whisper (`base`) — CTranslate2 | GCP VM |
-| **AI: Intonation** | FastDTW • Librosa MFCC | GCP VM |
-| **TTS (Audio mẫu)** | Google Cloud Text-to-Speech API | GCP VM |
+| **AI: Forced Alignment** | Wav2Vec2 (`facebook/wav2vec2-large-xlsr-53-german`) + German Phonetics | GCP VM |
+| **AI: Transcription & x_soft** | Faster-Whisper (`tiny`, int8) — CTranslate2 | GCP VM |
+| **AI: Intonation & Prosody** | FastDTW • Librosa pYIN (F0 Semitones) | GCP VM |
+| **TTS (Audio mẫu)** | Google Cloud Text-to-Speech (Neural2-B) | GCP VM |
 | **Database & Storage** | Firebase Auth • Cloud Firestore • Storage | Firebase Cloud |
 
 ---

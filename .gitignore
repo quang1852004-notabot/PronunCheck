@@ -25,6 +25,10 @@ github_deploy_key*
 
 # Secrets and Caches
 google_key.json
+*key*.json
+pronuncheck-*.json
+*.pem
+*.key
 reference_audio/
 
 # Internal context files

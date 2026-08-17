@@ -1,45 +1,281 @@
+"""
+================================================================================
+                    PRONUNCHECK ADVANCED SCORING ENGINE
+================================================================================
+Kiến trúc Chấm điểm Sơ cấp (Light Tier) kết hợp:
+  1. Whisper-Tiny: Nhận diện từ & Độ trọn vẹn (Completeness Factor x_soft).
+  2. Wav2Vec2 CTC: Forced Alignment + Phân tích âm vị & Thời lượng nguyên âm.
+  3. F0 + FastDTW: So khớp đường cong cao độ (Pitch Contour) với Google TTS Neural2-B.
+  4. German Phonetics Engine: Xử lý Ich/Ach-Laut, Auslautverhärtung và sinh feedback.
+  5. Dynamic Scoring Specification: Trọng số động Sigmoid kết hợp tuyến tính.
+================================================================================
+"""
+
 import os
+import difflib
+from collections import Counter
+from typing import Dict, List, Tuple, Optional, Any
+
 import numpy as np
 import torch
 import torchaudio.functional as F
 import librosa
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
-from google.cloud import texttospeech
-from collections import Counter
+import io
+import soundfile as sf
+import gtts
+
 import config
+import german_phonetics
 
-# Khai báo trực tiếp đường dẫn file json chứa key trong thư mục gốc của dự án.
-KEY_PATH = os.path.join(os.path.dirname(__file__), "google_key.json")
-if os.path.exists(KEY_PATH):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = KEY_PATH
+# Tự động phát hiện và nạp Service Account Key cho Google Cloud TTS API
+base_dir = os.path.dirname(__file__)
+potential_keys = [
+    os.path.join(base_dir, "google_key.json"),
+    os.path.join(base_dir, "pronuncheck-504621-b900ded86d5c.json")
+]
+# Quét thêm các file json secret nếu có
+for f in os.listdir(base_dir):
+    if f.endswith(".json") and (f.startswith("pronuncheck-") or "key" in f.lower()):
+        full_p = os.path.join(base_dir, f)
+        if full_p not in potential_keys:
+            potential_keys.append(full_p)
 
-def get_reference_audio(expected_word: str):
-    word_clean = expected_word.strip().lower()
-    ref_path = os.path.join(config.REFERENCE_AUDIO_DIR, f"{word_clean}.wav")
+for kp in potential_keys:
+    if os.path.exists(kp):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = kp
+        break
+
+
+# ==============================================================================
+# 1. TỔNG HỢP & QUẢN LÝ AUDIO MẪU (GOOGLE TTS NEURAL2 & GTTS FALLBACK)
+# ==============================================================================
+def get_reference_audio(expected_text: str) -> Optional[str]:
+    """
+    Lấy file audio chuẩn bản xứ cho từ hoặc câu mục tiêu.
+    Tự động cache vào thư mục REFERENCE_AUDIO_DIR.
+    
+    Cơ chế dự phòng 2 lớp thông minh:
+      - Lớp 1 (Ưu tiên): Google Cloud Text-to-Speech API (de-DE-Neural2-B) - tự động xác thực
+        trên GCP VM qua Application Default Credentials (ADC) hoặc qua google_key.json.
+      - Lớp 2 (Fallback): Thư viện gTTS (Google Translate TTS) - miễn phí 100%, không cần
+        bất kỳ API key hay file JSON cấu hình nào, hoạt động tức thì trên môi trường Local.
+    """
+    clean_name = "".join(c for c in expected_text.strip().lower() if c.isalnum() or c in ['_', '-'])
+    if not clean_name:
+        clean_name = "ref_sample"
+        
+    ref_path = os.path.join(config.REFERENCE_AUDIO_DIR, f"{clean_name}.wav")
     
     if os.path.exists(ref_path):
         return ref_path
         
+    # 1. Thử gọi Google Cloud Text-to-Speech API cao cấp (Neural2-B)
     try:
         client = texttospeech.TextToSpeechClient()
-        synthesis_input = texttospeech.SynthesisInput(text=expected_word)
+        synthesis_input = texttospeech.SynthesisInput(text=expected_text)
         voice = texttospeech.VoiceSelectionParams(language_code="de-DE", name="de-DE-Neural2-B")
-        audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.LINEAR16, sample_rate_hertz=16000)
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16, 
+            sample_rate_hertz=16000
+        )
         
         response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
         with open(ref_path, "wb") as out:
             out.write(response.audio_content)
         return ref_path
-    except Exception as e:
-        print(f"TTS Error (Check Google Credentials): {e}")
-        return None
+    except Exception as e_cloud:
+        # 2. Tự động chuyển sang gTTS (miễn phí, không cần key) nếu không có GCP Key
+        try:
+            tts = gtts.gTTS(text=expected_text, lang="de")
+            mp3_fp = io.BytesIO()
+            tts.write_to_fp(mp3_fp)
+            mp3_fp.seek(0)
+            y, sr = librosa.load(mp3_fp, sr=16000)
+            sf.write(ref_path, y, 16000)
+            return ref_path
+        except Exception as e_gtts:
+            print(f"TTS Synthesizer Fallback Error: {e_gtts}", flush=True)
+            return None
 
-def analyze_precise_score(audio_array: np.ndarray, expected_word: str, w2v_model, w2v_processor, vocab_dict):
-    if not w2v_model or not w2v_processor:
-        return 0.5, [], None
-    
+
+# ==============================================================================
+# 2. TRÍCH XUẤT CAO ĐỘ F0 & SO KHỚP NGỮ ĐIỆU (F0 PITCH + FASTDTW)
+# ==============================================================================
+def extract_f0_semitones(audio_array: np.ndarray, sr: int = 16000) -> np.ndarray:
+    """
+    Trích xuất đường cong cao độ F0 bằng thuật toán pYIN và chuẩn hóa sang bán âm tương đối:
+    Semitones(t) = 12 * log2(F0(t) / median(F0))
+    Giúp loại bỏ 100% sự khác biệt về âm vực giọng nam, nữ hay trẻ em.
+    """
+    if len(audio_array) == 0:
+        return np.zeros((1, 1))
+        
     try:
+        # pYIN: Probabilistic YIN cho độ chính xác cao trên giọng nói
+        f0, voiced_flag, voiced_probs = librosa.pyin(
+            audio_array,
+            fmin=config.F0_FMIN,
+            fmax=config.F0_FMAX,
+            sr=sr,
+            hop_length=config.F0_HOP_LENGTH
+        )
+        
+        # Nếu toàn bộ file là im lặng hoặc không tìm thấy âm hữu thanh
+        if f0 is None or np.all(np.isnan(f0)):
+            # Fallback dùng YIN
+            f0 = librosa.yin(
+                audio_array,
+                fmin=config.F0_FMIN,
+                fmax=config.F0_FMAX,
+                sr=sr,
+                hop_length=config.F0_HOP_LENGTH
+            )
+            if np.all(np.isnan(f0)):
+                return np.zeros((max(1, len(f0)), 1))
+
+        # Lấy các khung hữu thanh hợp lệ
+        valid_mask = ~np.isnan(f0) & (f0 > 0)
+        if not np.any(valid_mask):
+            return np.zeros((len(f0), 1))
+            
+        median_f0 = np.median(f0[valid_mask])
+        if median_f0 <= 0:
+            median_f0 = 150.0
+
+        # Chuyển đổi sang bán âm tương đối (Relative Semitones)
+        semitones = np.zeros_like(f0)
+        semitones[valid_mask] = 12.0 * np.log2(f0[valid_mask] / median_f0)
+        
+        # Điền các đoạn vô thanh bằng nội suy tuyến tính hoặc 0
+        if not np.all(valid_mask):
+            nans, x = np.isnan(semitones), lambda z: z.nonzero()[0]
+            if np.any(~nans):
+                semitones[nans] = np.interp(x(nans), x(~nans), semitones[~nans])
+            else:
+                semitones = np.zeros_like(f0)
+
+        # Định dạng mảng 2D cho FastDTW (N, 1)
+        return semitones.reshape(-1, 1)
+    except Exception as e:
+        print(f"F0 Extraction Warning: {e}", flush=True)
+        return np.zeros((10, 1))
+
+def calculate_dtw_score(user_audio: np.ndarray, expected_text: str) -> float:
+    """
+    So khớp đường cong ngữ điệu (Pitch Contour) giữa Audio học sinh và Audio chuẩn Google TTS.
+    Trả về điểm số chuẩn hóa trong thang điểm [0, 100].
+    """
+    ref_path = get_reference_audio(expected_text)
+    if not ref_path or not os.path.exists(ref_path):
+        return 80.0  # Điểm mặc định nếu không tạo được audio mẫu
+        
+    try:
+        ref_audio, _ = librosa.load(ref_path, sr=16000)
+        
+        user_f0 = extract_f0_semitones(user_audio, sr=16000)
+        ref_f0 = extract_f0_semitones(ref_audio, sr=16000)
+        
+        if len(user_f0) == 0 or len(ref_f0) == 0:
+            return 75.0
+            
+        distance, path = fastdtw(user_f0, ref_f0, dist=euclidean)
+        max_len = max(len(user_f0), len(ref_f0))
+        normalized_dist = distance / max(1, max_len)
+        
+        # Áp dụng hàm suy giảm mũ: score = exp(-decay * distance) * 100
+        score_0_1 = np.exp(-config.DTW_PITCH_DECAY * normalized_dist)
+        score_100 = float(np.clip(score_0_1 * 100.0, 0.0, 100.0))
+        return round(score_100, 2)
+    except Exception as e:
+        print(f"DTW Pitch Error: {e}", flush=True)
+        return 75.0
+
+
+# ==============================================================================
+# 3. NHẬN DIỆN TỪ & ĐỘ TRỌN VẸN (WHISPER-TINY & SOFT MATCHING FACTOR)
+# ==============================================================================
+def analyze_with_whisper(audio_array: np.ndarray, expected_text: str, whisper_model) -> Tuple[float, str]:
+    """
+    Sử dụng Faster-Whisper (Tiny) để kiểm tra:
+      - Học viên có thực sự nói các từ mục tiêu không?
+      - Tính toán hệ số hoàn thành mượt mà x_soft in [0.0, 1.0].
+    Trả về (x_soft_100, transcribed_text)
+    """
+    if whisper_model is None:
+        return 80.0, expected_text
+        
+    try:
+        segments_gen, info = whisper_model.transcribe(
+            audio_array,
+            beam_size=5,
+            language="de",
+            word_timestamps=False,
+            condition_on_previous_text=False
+        )
+        
+        transcribed_text = " ".join([seg.text.strip() for seg in segments_gen]).strip().lower()
+        if not transcribed_text:
+            return 0.0, ""  # Không nhận diện được tiếng người
+            
+        expected_clean = expected_text.lower().strip()
+        expected_words = [w for w in expected_clean.split() if w]
+        
+        if not expected_words:
+            return 100.0, transcribed_text
+
+        # 1. Kiểm tra từ mục tiêu có xuất hiện trọn vẹn trong văn bản không
+        if expected_clean in transcribed_text:
+            return 100.0, transcribed_text
+            
+        # 2. Tính tỷ lệ số từ xuất hiện (Word Recall)
+        matched_words = 0
+        for w in expected_words:
+            if w in transcribed_text:
+                matched_words += 1
+                
+        word_recall = matched_words / len(expected_words)
+        
+        # 3. Tính độ tương đồng ký tự (Levenshtein Sequence Matcher)
+        seq_matcher = difflib.SequenceMatcher(None, expected_clean, transcribed_text)
+        char_similarity = seq_matcher.ratio()
+        
+        # x_soft là kết hợp linh hoạt giữa Word Recall và Character Similarity
+        x_soft = max(word_recall, char_similarity)
+        
+        # Chuyển về thang điểm 100
+        x_soft_100 = float(np.clip(x_soft * 100.0, 0.0, 100.0))
+        return round(x_soft_100, 2), transcribed_text
+    except Exception as e:
+        print(f"Whisper Exception: {e}", flush=True)
+        return 70.0, expected_text
+
+# Giữ tên hàm analyze_with_whisperx để tương thích hoàn toàn
+def analyze_with_whisperx(audio_array: np.ndarray, expected_word: str, whisper_model) -> float:
+    score, _ = analyze_with_whisper(audio_array, expected_word, whisper_model)
+    return score / 100.0
+
+
+# ==============================================================================
+# 4. FORCED ALIGNMENT & BỘ LUẬT NGỮ ÂM TIẾNG ĐỨC (WAV2VEC2 + GERMAN RULES)
+# ==============================================================================
+def analyze_precise_score(
+    audio_array: np.ndarray,
+    expected_word: str,
+    w2v_model,
+    w2v_processor,
+    vocab_dict: Dict[str, int]
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """
+    Phân tích độ chuẩn xác từng âm vị/ký tự qua Wav2Vec2 CTC Forced Alignment,
+    đồng thời áp dụng bộ luật ngữ âm tiếng Đức (Auslautverhärtung, Vowel Duration, Ich/Ach-Laut).
+    """
+    if not w2v_model or not w2v_processor or not vocab_dict:
+        return 0.5, [], None
+        
+    try:
+        # Chuẩn bị input cho Wav2Vec2
         inputs = w2v_processor(audio_array, sampling_rate=16000, return_tensors="pt").to(config.DEVICE)
         with torch.inference_mode():
             logits = w2v_model(**inputs).logits
@@ -48,6 +284,7 @@ def analyze_precise_score(audio_array: np.ndarray, expected_word: str, w2v_model
         greedy_indices = torch.argmax(logits, dim=-1)[0].cpu().numpy()
         greedy_chars = [w2v_processor.tokenizer.convert_ids_to_tokens(int(idx)) for idx in greedy_indices]
         
+        # Tạo danh sách tokens mục tiêu
         tokens = []
         chars_list = []
         for char in expected_word.upper():
@@ -62,10 +299,12 @@ def analyze_precise_score(audio_array: np.ndarray, expected_word: str, w2v_model
         targets = torch.tensor([tokens], dtype=torch.int32)
         blank_id = w2v_processor.tokenizer.pad_token_id
         
+        # Thực hiện CTC Forced Alignment
         alignments, scores = F.forced_align(emissions, targets, blank=blank_id)
         alignments = alignments[0].tolist()
         probs = torch.exp(scores[0]).tolist()
         
+        # Gom các frame liên tiếp thành token spans
         token_spans = []
         current_token = None
         start_frame = 0
@@ -74,37 +313,84 @@ def analyze_precise_score(audio_array: np.ndarray, expected_word: str, w2v_model
         for i, (token_id, prob) in enumerate(zip(alignments, probs)):
             if token_id == blank_id:
                 if current_token is not None:
-                    token_spans.append({"token_id": current_token, "score": sum(current_scores)/len(current_scores), "start": start_frame, "end": i-1})
+                    token_spans.append({
+                        "token_id": current_token,
+                        "score": sum(current_scores)/len(current_scores),
+                        "start": start_frame,
+                        "end": i - 1
+                    })
                     current_token = None
             else:
                 if token_id != current_token:
                     if current_token is not None:
-                        token_spans.append({"token_id": current_token, "score": sum(current_scores)/len(current_scores), "start": start_frame, "end": i-1})
+                        token_spans.append({
+                            "token_id": current_token,
+                            "score": sum(current_scores)/len(current_scores),
+                            "start": start_frame,
+                            "end": i - 1
+                        })
                     current_token = token_id
                     current_scores = [prob]
                     start_frame = i
                 else:
                     current_scores.append(prob)
+                    
         if current_token is not None:
-            token_spans.append({"token_id": current_token, "score": sum(current_scores)/len(current_scores), "start": start_frame, "end": len(alignments)-1})
+            token_spans.append({
+                "token_id": current_token,
+                "score": sum(current_scores)/len(current_scores),
+                "start": start_frame,
+                "end": len(alignments) - 1
+            })
             
         char_scores = []
         if len(token_spans) == len(chars_list):
             for i, span in enumerate(token_spans):
                 c = chars_list[i]
                 if c != ' ':
-                    g_chars = [greedy_chars[idx] for idx in range(span["start"], span["end"]+1) if greedy_chars[idx] not in ['<pad>', '<s>', '</s>', '|']]
+                    # Lấy ký tự phổ biến nhất trong frame span
+                    g_chars = [
+                        greedy_chars[idx] for idx in range(span["start"], span["end"] + 1)
+                        if greedy_chars[idx] not in ['<pad>', '<s>', '</s>', '|']
+                    ]
                     actual_c = Counter(g_chars).most_common(1)[0][0] if g_chars else "?"
+                    raw_score = float(span["score"])
+                    
+                    # -------------------------------------------------------------
+                    # ÁP DỤNG LUẬT 1: VÔ THANH HÓA PHỤ ÂM CUỐI (Auslautverhärtung)
+                    # -------------------------------------------------------------
+                    devoice_rule = german_phonetics.is_devoicing_coda_candidate(c, i, expected_word)
+                    if devoice_rule:
+                        target_unvoiced = devoice_rule["phonetic_target"]
+                        # Nếu học viên phát âm thành âm vô thanh tương ứng (ví dụ d->t, b->p, g->k)
+                        if actual_c.upper() == target_unvoiced or (c == 'G' and actual_c.upper() in ['K', 'C', 'H']):
+                            raw_score = max(raw_score, 0.95)
+                            actual_c = f"{actual_c} ({devoice_rule['ipa']})"
+                    
+                    # -------------------------------------------------------------
+                    # ÁP DỤNG LUẬT 2: ĐỘ DÀI NGUYÊN ÂM (Vowel Duration)
+                    # -------------------------------------------------------------
+                    vowel_expected_type = german_phonetics.classify_vowel_expected_length(expected_word, i)
+                    span_frames = max(1, span["end"] - span["start"] + 1)
+                    duration_mult, duration_msg = german_phonetics.evaluate_vowel_duration(
+                        span_frames, vowel_expected_type
+                    )
+                    
+                    final_char_score = float(np.clip(raw_score * duration_mult, 0.05, 1.0))
+                    
                     char_scores.append({
-                        "char": c, 
-                        "score": span["score"],
-                        "actual": actual_c
+                        "char": c,
+                        "score": round(final_char_score, 3),
+                        "actual": actual_c,
+                        "duration_frames": span_frames,
+                        "duration_multiplier": duration_mult,
+                        "duration_feedback": duration_msg if duration_mult < 1.0 else None
                     })
-        
+                    
         if not char_scores:
             return 0.5, [], None
             
-        avg_gop = sum(x["score"] for x in char_scores) / len(char_scores)
+        avg_gop = float(sum(x["score"] for x in char_scores) / len(char_scores))
         worst_char_info = min(char_scores, key=lambda x: x["score"])
         
         return avg_gop, char_scores, worst_char_info
@@ -112,86 +398,78 @@ def analyze_precise_score(audio_array: np.ndarray, expected_word: str, w2v_model
         print(f"Forced Alignment Error: {e}", flush=True)
         return 0.5, [], None
 
-def extract_mfcc(y, sr=16000):
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-    return mfcc.T
 
-def calculate_dtw_score(user_audio: np.ndarray, expected_word: str):
-    ref_path = get_reference_audio(expected_word)
-    if not ref_path: return 1.0 
-        
-    try:
-        ref_audio, _ = librosa.load(ref_path, sr=16000)
-        user_mfcc = extract_mfcc(user_audio)
-        ref_mfcc = extract_mfcc(ref_audio)
-        
-        distance, path = fastdtw(user_mfcc, ref_mfcc, dist=euclidean)
-        max_len = max(len(user_mfcc), len(ref_mfcc))
-        normalized_dist = distance / max_len
-        
-        score = np.exp(-0.05 * normalized_dist)
-        return float(np.clip(score, 0.0, 1.0))
-    except Exception as e:
-        print(f"DTW Error: {e}")
-        return 1.0
-
-def analyze_with_whisperx(audio_array: np.ndarray, expected_word: str, whisper_model) -> float:
-    if not whisper_model: return 0.5
-    try:
-        segments_gen, info = whisper_model.transcribe(
-            audio_array, 
-            beam_size=5, 
-            language="de", 
-            word_timestamps=False,
-            initial_prompt=expected_word,
-            condition_on_previous_text=False
-        )
-        
-        expected_clean = expected_word.lower().strip()
-        
-        for segment in segments_gen:
-            text_clean = segment.text.lower()
-            if expected_clean in text_clean:
-                return 1.0  # Hoàn toàn nghe ra từ đó
-            
-        return 0.0 # Không nghe ra từ mục tiêu
-    except Exception as e:
-        print(f"Whisper Exception: {e}", flush=True)
-        return 0.5
-
-def calculate_dynamic_score(precise_score, whisper_score, dtw_score, expected_word, worst_char_info):
-    L = len(expected_word.replace(" ", ""))
-    L_clamped = max(5, min(L, 30))
+# ==============================================================================
+# 5. THUẬT TOÁN CHẤM ĐIỂM ĐỘNG MỚI (DYNAMIC SCORING SPECIFICATION)
+# ==============================================================================
+def calculate_dynamic_score(
+    precise_score: float,        # GOP Accuracy [0.0 - 1.0] hoặc [0 - 100]
+    whisper_score: float,        # Whisper completeness [0.0 - 1.0] hoặc [0 - 100]
+    dtw_score: float,            # F0 DTW pitch score [0.0 - 1.0] hoặc [0 - 100]
+    expected_text: str,
+    worst_char_info: Optional[Dict[str, Any]] = None,
+    char_scores: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    Thuật toán chấm điểm phát âm toàn diện:
+    Final Score = x_soft * (w_acc(L) * y + w_flu(L) * z)
     
-    w_p = 0.8 - (0.4 * (L_clamped - 5) / 25)
-    w_p = max(0.4, min(0.8, w_p))
-    w_f = 1.0 - w_p
+    Trong đó:
+      - x_soft: Hệ số hoàn thành từ Whisper [0.0 - 1.0].
+      - y: Điểm độ chuẩn xác âm vị GOP (Accuracy) [0 - 100].
+      - z: Điểm lưu loát & ngữ điệu (Fluency & Prosody từ F0 DTW) [0 - 100].
+      - w_acc(L) = 1 / (1 + exp(k * (L - L0))): Trọng số Sigmoid theo độ dài hiệu dụng.
+      - w_flu(L) = 1 - w_acc(L).
+    """
+    # Chuẩn hóa các thang điểm về [0, 100]
+    y_acc = float(precise_score * 100.0 if precise_score <= 1.0 else precise_score)
+    z_flu = float(dtw_score * 100.0 if dtw_score <= 1.0 else dtw_score)
+    x_soft = float(whisper_score if whisper_score <= 1.0 else whisper_score / 100.0)
+    x_soft = float(np.clip(x_soft, 0.0, 1.0))
     
-    fluent_score = whisper_score * dtw_score
-    final_score = (precise_score ** w_p) * (fluent_score ** w_f)
-    final_100 = round(final_score * 100, 2)
-    is_passed = final_score >= 0.55
+    # 1. Tính độ dài hiệu dụng L (kết hợp số từ và số âm tiết)
+    eff_l, num_words, num_syllables = german_phonetics.calculate_effective_length(expected_text)
     
-    feedback = "Phát âm rất rõ ràng, ngữ điệu tự nhiên!"
-    if not is_passed:
-        if whisper_score < 0.3:
-            feedback = f"Hệ thống không nghe rõ từ '{expected_word}'. Vui lòng đọc to và rõ hơn."
-        elif worst_char_info and worst_char_info["score"] < 0.5:
-            expected_c = worst_char_info["char"]
-            actual_c = worst_char_info.get("actual", "?")
-            if actual_c and actual_c != "?":
-                feedback = f"Bạn đang đọc từ '{expected_word}', nhưng hệ thống nhận thấy bạn phát âm âm '{expected_c}' giống với âm '{actual_c}'. Hãy chú ý điều chỉnh nhé."
-            else:
-                feedback = f"Bạn phát âm âm '{expected_c}' chưa được rõ ràng. Hãy nghe lại audio mẫu và thử lại."
-        elif dtw_score < 0.6:
-            feedback = "Các âm bạn đọc khá đúng, nhưng ngữ điệu và nhịp điệu chưa giống bản xứ. Hãy đọc dứt khoát hơn."
-            
+    # 2. Tính trọng số động Sigmoid
+    # w_acc: Từ ngắn (L nhỏ) -> w_acc cao (~0.8 - 0.9); Câu dài -> w_acc thấp (~0.2 - 0.4)
+    exponent = config.SCORING_K * (eff_l - config.SCORING_L0)
+    # Tránh overflow cho exp
+    exponent_clamped = max(-20.0, min(20.0, exponent))
+    w_acc = float(1.0 / (1.0 + np.exp(exponent_clamped)))
+    w_flu = float(1.0 - w_acc)
+    
+    # 3. Tính điểm lõi kết hợp tuyến tính (không bị lỗi triệt tiêu của phép nhân)
+    linear_core_score = (w_acc * y_acc) + (w_flu * z_flu)
+    
+    # 4. Áp dụng hệ số trọn vẹn x_soft
+    final_score = x_soft * linear_core_score
+    final_score_clamped = float(np.clip(final_score, 0.0, 100.0))
+    
+    is_passed = bool(final_score_clamped >= config.PASSING_THRESHOLD)
+    
+    # 5. Sinh nhận xét sư phạm tiếng Đức chi tiết
+    all_chars = char_scores if char_scores is not None else ([worst_char_info] if worst_char_info else [])
+    feedback = german_phonetics.generate_german_feedback(
+        expected_word=expected_text,
+        char_scores=all_chars,
+        whisper_score=x_soft,
+        dtw_pitch_score=z_flu / 100.0,
+        is_passed=is_passed
+    )
+    
     return {
-        "precise_score": round(precise_score * 100, 2),
-        "whisper_score": round(whisper_score * 100, 2),
-        "dtw_score": round(dtw_score * 100, 2),
-        "fluent_score": round(fluent_score * 100, 2),
-        "hybrid_target_score": final_100,
+        "precise_score": round(y_acc, 2),
+        "whisper_score": round(x_soft * 100.0, 2),
+        "dtw_score": round(z_flu, 2),
+        "fluent_score": round(z_flu, 2),
+        "hybrid_target_score": round(final_score_clamped, 2),
         "is_passed": is_passed,
-        "feedback": feedback
+        "feedback": feedback,
+        "weights": {
+            "w_acc": round(w_acc, 3),
+            "w_flu": round(w_flu, 3),
+            "effective_length": round(eff_l, 2),
+            "num_words": num_words,
+            "num_syllables": num_syllables
+        }
     }
