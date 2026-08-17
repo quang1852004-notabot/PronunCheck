@@ -23,9 +23,18 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "PronunCheck - Luyen Phat Am",
-  description: "Ung dung kiem tra phat am tieng Duc cho hoc sinh",
+  title: "PronunCheck - Luyện Phát Âm",
+  description: "Ứng dụng kiểm tra phát âm tiếng Đức cho học sinh",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

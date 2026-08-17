@@ -2,8 +2,8 @@
 setlocal
 title Backend Server Status Checker
 
-:: Thay đổi địa chỉ IP hoặc hostname của backend server (VM) của bạn ở đây
-set "SERVER=192.168.1.100" 
+:: Thay đổi địa chỉ IP hoặc hostname của backend server (VM) ở đây
+set "SERVER=34.22.134.252" 
 
 echo =======================================================
 echo Checking status of backend server: %SERVER%
