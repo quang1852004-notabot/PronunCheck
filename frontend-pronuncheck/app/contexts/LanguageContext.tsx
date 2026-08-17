@@ -160,9 +160,19 @@ export const dictionary: Record<Language, Record<string, string>> = {
 
     // Scoring Config
     "config.title": "Cấu hình Chấm điểm AI (V3.5)",
-    "config.desc": "Hệ thống sử dụng thuật toán Dynamic Sigmoid kết hợp Wav2Vec2, FastDTW và Faster-Whisper.",
+    "config.desc": "Hệ thống sử dụng thuật toán Dynamic Sigmoid kết hợp Wav2Vec2, FastDTW và Faster-Whisper thích ứng theo độ dài câu.",
+    "config.mode_auto": "🤖 Tự động (Khuyên dùng)",
+    "config.mode_manual": "⚙️ Thủ công & Đồ thị SVG",
     "config.threshold": "Ngưỡng đạt bài tập (Passing Threshold)",
     "config.threshold_hint": "Học sinh đạt tổng điểm >= ngưỡng này sẽ được tính là Đạt.",
+    "config.l0_label": "Điểm chuyển tiếp độ dài L0 (Trung tâm cân bằng âm vị / ngữ điệu)",
+    "config.k_label": "Độ dốc chuyển đổi k (Tốc độ chuyển giao trọng số)",
+    "config.graph_title": "Đồ thị Phân bổ Trọng số Động theo Độ dài Hiệu dụng L",
+    "config.graph_desc": "Đường màu xanh (Âm vị) giảm dần, đường màu tím (Ngữ điệu) tăng dần khi câu dài ra. Đường nằm ngang màu vàng là Ngưỡng Đạt.",
+    "config.sim_title": "Thử nghiệm Mô phỏng Trọng số Nhanh:",
+    "config.sim_short": "🔤 Từ ngắn (L≈1.5): Schule",
+    "config.sim_medium": "📑 Cụm từ (L≈4.5): das Mineralwasser",
+    "config.sim_long": "📖 Câu dài (L≈8.0): Ich lerne heute Deutsch",
     "config.save_btn": "Lưu cấu hình",
     "config.saved_success": "Lưu cấu hình thành công!",
 
@@ -359,9 +369,19 @@ export const dictionary: Record<Language, Record<string, string>> = {
 
     // Scoring Config
     "config.title": "AI Scoring Engine (V3.5)",
-    "config.desc": "Combines Wav2Vec2 German phonetics, FastDTW pitch intonation and Faster-Whisper.",
+    "config.desc": "Combines Wav2Vec2 German phonetics, FastDTW pitch intonation and Faster-Whisper dynamically adapting to sentence length.",
+    "config.mode_auto": "🤖 Automatic (Recommended)",
+    "config.mode_manual": "⚙️ Manual & Interactive Graph",
     "config.threshold": "Passing Threshold",
     "config.threshold_hint": "Students with overall score >= threshold will be marked as Passed.",
+    "config.l0_label": "Crossover Length Threshold L0 (Balance center between phoneme & intonation)",
+    "config.k_label": "Sigmoid Transition Slope k (Weight transfer rate)",
+    "config.graph_title": "Dynamic Weight Distribution vs Effective Length (L)",
+    "config.graph_desc": "Green curve (Phoneme) decreases, Purple curve (Intonation/Fluency) increases as sentence length grows. Dashed yellow line is Passing Threshold.",
+    "config.sim_title": "Quick Live Simulation Sandbox:",
+    "config.sim_short": "🔤 Short Word (L≈1.5): Schule",
+    "config.sim_medium": "📑 Phrase (L≈4.5): das Mineralwasser",
+    "config.sim_long": "📖 Long Sentence (L≈8.0): Ich lerne heute Deutsch",
     "config.save_btn": "Save Config",
     "config.saved_success": "Scoring config saved successfully!",
 
@@ -558,9 +578,19 @@ export const dictionary: Record<Language, Record<string, string>> = {
 
     // Scoring Config
     "config.title": "KI-Bewertungs-Engine (V3.5)",
-    "config.desc": "Kombination aus Wav2Vec2, FastDTW-Intonation und Faster-Whisper.",
+    "config.desc": "Kombination aus Wav2Vec2, FastDTW-Intonation und Faster-Whisper, dynamisch an Satzlänge angepasst.",
+    "config.mode_auto": "🤖 Automatisch (Empfohlen)",
+    "config.mode_manual": "⚙️ Manuell & Interaktiver Graph",
     "config.threshold": "Bestehensgrenze (Passing Threshold)",
     "config.threshold_hint": "Schüler mit einer Gesamtnote >= dieser Grenze haben bestanden.",
+    "config.l0_label": "Übergangsschwelle L0 (Gleichgewichtszentrum Phonetik / Intonation)",
+    "config.k_label": "Sigmoid-Steigung k (Gewichtsübergangsrate)",
+    "config.graph_title": "Dynamische Gewichtsverteilung nach effektiver Länge (L)",
+    "config.graph_desc": "Grüne Kurve (Phonetik) sinkt, violette Kurve (Intonation) steigt mit längeren Sätzen. Gestrichelte gelbe Linie ist Bestehensgrenze.",
+    "config.sim_title": "Schnelle Live-Simulation:",
+    "config.sim_short": "🔤 Kurzwort (L≈1.5): Schule",
+    "config.sim_medium": "📑 Phrase (L≈4.5): das Mineralwasser",
+    "config.sim_long": "📖 Langer Satz (L≈8.0): Ich lerne heute Deutsch",
     "config.save_btn": "Konfiguration speichern",
     "config.saved_success": "Konfiguration erfolgreich gespeichert!",
 
@@ -619,7 +649,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         return savedLang;
       }
     }
-    return "vi";
+    return "en";
   });
 
   const setLanguage = (lang: Language) => {
@@ -630,7 +660,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   };
 
   const t = (key: string): string => {
-    return dictionary[language]?.[key] || dictionary["vi"]?.[key] || key;
+    return dictionary[language]?.[key] || dictionary["en"]?.[key] || dictionary["vi"]?.[key] || key;
   };
 
   return (

@@ -15,8 +15,13 @@ import {
 
 export interface ScoringConfig {
   threshold: number;
-  w1: number;
-  w2: number;
+  mode?: 'auto' | 'manual';
+  L0?: number;
+  k?: number;
+  w1?: number;
+  w2?: number;
+  passing_threshold?: number;
+  weights?: any;
 }
 
 export interface ClassData {
