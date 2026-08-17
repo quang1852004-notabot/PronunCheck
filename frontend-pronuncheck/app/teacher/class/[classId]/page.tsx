@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, use } from 'react';
 import AuthGuard from '@/app/components/AuthGuard';
+import Navbar from '@/app/components/Navbar';
+import { useLanguage } from '@/app/contexts/LanguageContext';
+import { useToast } from '@/app/contexts/ToastContext';
 import { 
   getClass, 
   getAssignments, 
@@ -12,17 +15,18 @@ import {
   AssignmentData, 
   SubmissionData 
 } from '@/app/lib/firestore';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import AssignmentForm from '@/app/teacher/components/AssignmentForm';
 import EditAssignmentModal from '@/app/teacher/components/EditAssignmentModal';
 import ScoringConfigComponent from '@/app/teacher/components/ScoringConfig';
 import SubmissionTable from '@/app/teacher/components/SubmissionTable';
-import { Edit2, Trash2, ArrowLeft, Copy, Check, Power, AlertTriangle } from 'lucide-react';
+import { Edit2, Trash2, ArrowLeft, Copy, Check, Power, AlertTriangle, BookOpen, Sliders, Table2 } from 'lucide-react';
 
-export default function ClassDetail() {
-  const params = useParams();
-  const classId = params.classId as string;
+export default function ClassDetail({ params }: { params: Promise<{ classId: string }> }) {
+  const { classId } = use(params);
   const router = useRouter();
+  const { t } = useLanguage();
+  const { success, error: toastError } = useToast();
 
   const [classData, setClassData] = useState<ClassData | null>(null);
   const [assignments, setAssignments] = useState<AssignmentData[]>([]);
@@ -62,6 +66,7 @@ export default function ClassDetail() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
+    success(t('common.copied'));
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -71,9 +76,10 @@ export default function ClassDetail() {
     try {
       await updateAssignment(classId, assignment.id, { isActive: newStatus });
       setAssignments(prev => prev.map(a => a.id === assignment.id ? { ...a, isActive: newStatus } : a));
+      success(newStatus ? 'Đã mở bài tập' : 'Đã đóng bài tập');
     } catch (error) {
       console.error('Error toggling assignment status:', error);
-      alert('Không thể thay đổi trạng thái bài tập.');
+      toastError('Không thể thay đổi trạng thái bài tập.');
     }
   };
 
@@ -84,9 +90,10 @@ export default function ClassDetail() {
       await deleteAssignment(classId, deletingAssignment.id);
       setAssignments(prev => prev.filter(a => a.id !== deletingAssignment.id));
       setDeletingAssignment(null);
+      success(t('assignment.deleted_success'));
     } catch (error) {
       console.error('Error deleting assignment:', error);
-      alert('Lỗi khi xóa bài tập.');
+      toastError('Lỗi khi xóa bài tập.');
     } finally {
       setIsDeleting(false);
     }
@@ -94,268 +101,273 @@ export default function ClassDetail() {
 
   return (
     <AuthGuard allowedRole="teacher">
-      <div className="min-h-screen bg-gray-900 text-gray-100 p-4 sm:p-8">
-        <div className="max-w-6xl mx-auto space-y-8">
-          {/* Header */}
-          <div className="bg-gray-800 p-6 rounded-3xl shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-gray-700">
-            <div className="flex items-center space-x-4">
+      <main className="min-h-screen bg-gray-900 text-white flex flex-col w-full max-w-full overflow-x-hidden">
+        <Navbar currentRole="teacher" />
+
+        <div className="flex-1 p-4 sm:p-6 md:p-8 max-w-6xl mx-auto w-full space-y-6">
+          {/* Header Card */}
+          <div className="bg-gray-800/90 p-5 sm:p-6 rounded-3xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-gray-700/80">
+            <div className="flex items-center space-x-3 sm:space-x-4">
               <button
                 onClick={() => router.push('/teacher')}
-                className="p-3 bg-gray-700 hover:bg-gray-600 rounded-2xl transition-colors text-gray-300 hover:text-white cursor-pointer"
-                title="Quay lại danh sách lớp"
+                className="p-2.5 bg-gray-700/80 hover:bg-gray-700 rounded-2xl transition-colors text-gray-300 hover:text-white cursor-pointer shrink-0"
+                title={t('common.back')}
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <div>
-                <h1 className="text-2xl font-bold text-white">
-                  {classData ? classData.className : 'Đang tải...'}
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-black text-white truncate">
+                  {classData ? (classData.className || classData.name) : t('common.loading')}
                 </h1>
-                <div className="flex items-center space-x-2 mt-1.5">
-                  <span className="text-gray-400 text-xs">Mã lớp:</span>
-                  <code className="bg-gray-900 px-2.5 py-1 rounded-lg text-blue-400 font-mono text-sm font-bold border border-gray-700">
+                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                  <span className="text-gray-400 text-xs">{t('student.class_id')}:</span>
+                  <code className="bg-gray-900 px-2.5 py-0.5 rounded-lg text-blue-400 font-mono text-xs font-bold border border-gray-700">
                     {classId}
                   </code>
                   <button
                     onClick={() => copyToClipboard(classId)}
-                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-gray-700/50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs"
-                    title="Sao chép mã lớp"
+                    className="p-1 text-gray-400 hover:text-blue-400 hover:bg-gray-700/50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs"
+                    title={t('common.copy')}
                   >
-                    {copied ? (
-                      <>
-                        <Check className="w-4 h-4 text-green-400" />
-                        <span className="text-green-400 font-medium">Đã copy</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4" />
-                        <span>Copy mã</span>
-                      </>
-                    )}
+                    {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copied ? t('common.copied') : t('common.copy')}</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 self-end sm:self-center text-sm text-gray-400 bg-gray-900/60 px-4 py-2 rounded-xl border border-gray-700/60">
-              <span>{classData?.password ? '🔒 Có mật khẩu bảo vệ' : '🔓 Mở tự do'}</span>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-gray-900 text-gray-300 text-xs rounded-xl border border-gray-700">
+                {assignments.length} {t('tab.assignments').toLowerCase()} • {submissions.length} {t('sub.submissions_count')}
+              </span>
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex space-x-2 border-b border-gray-700 overflow-x-auto pb-px">
-            <button
-              onClick={() => setActiveTab('assignments')}
-              className={`px-6 py-3 font-semibold transition-all border-b-2 whitespace-nowrap cursor-pointer ${
-                activeTab === 'assignments'
-                  ? 'border-blue-400 text-blue-400 bg-blue-500/10 rounded-t-xl'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              📚 Bài tập ({assignments.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('config')}
-              className={`px-6 py-3 font-semibold transition-all border-b-2 whitespace-nowrap cursor-pointer ${
-                activeTab === 'config'
-                  ? 'border-blue-400 text-blue-400 bg-blue-500/10 rounded-t-xl'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              ⚙️ Cấu hình chấm điểm
-            </button>
-            <button
-              onClick={() => setActiveTab('submissions')}
-              className={`px-6 py-3 font-semibold transition-all border-b-2 whitespace-nowrap cursor-pointer ${
-                activeTab === 'submissions'
-                  ? 'border-blue-400 text-blue-400 bg-blue-500/10 rounded-t-xl'
-                  : 'border-transparent text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              📊 Kết quả học sinh ({submissions.length})
-            </button>
+          {/* Navigation Tabs - Horizontal scrolling with no overflow break */}
+          <div className="w-full overflow-x-auto scrollbar-none">
+            <nav className="flex space-x-2 border-b border-gray-700/80 pb-px min-w-max">
+              <button
+                onClick={() => setActiveTab('assignments')}
+                className={`py-3 px-4 sm:px-6 font-bold text-xs sm:text-sm rounded-t-2xl transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'assignments'
+                    ? 'border-b-2 border-blue-500 text-blue-400 bg-gray-800/80 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/40'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" />
+                {t('tab.assignments')} ({assignments.length})
+              </button>
+
+              <button
+                onClick={() => setActiveTab('config')}
+                className={`py-3 px-4 sm:px-6 font-bold text-xs sm:text-sm rounded-t-2xl transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'config'
+                    ? 'border-b-2 border-blue-500 text-blue-400 bg-gray-800/80 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/40'
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+                {t('tab.scoring_config')}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('submissions')}
+                className={`py-3 px-4 sm:px-6 font-bold text-xs sm:text-sm rounded-t-2xl transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'submissions'
+                    ? 'border-b-2 border-blue-500 text-blue-400 bg-gray-800/80 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/40'
+                }`}
+              >
+                <Table2 className="w-4 h-4" />
+                {t('tab.submissions')} ({submissions.length})
+              </button>
+            </nav>
           </div>
 
-          {/* Content */}
-          {loading ? (
-            <div className="text-center py-16">
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-400 mx-auto"></div>
-            </div>
-          ) : (
-            <div className="bg-gray-800 p-6 sm:p-8 rounded-3xl shadow-2xl border border-gray-700">
-              {activeTab === 'assignments' && (
-                <div className="space-y-10">
-                  <AssignmentForm classId={classId} onCreated={loadData} />
-                  
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                        <span>📋</span> Danh sách bài tập ({assignments.length})
-                      </h3>
-                    </div>
+          {/* Tab 1: Assignments */}
+          {activeTab === 'assignments' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <AssignmentForm classId={classId} onCreated={loadData} />
 
-                    <div className="grid gap-4">
-                      {assignments.map(a => (
-                        <div 
-                          key={a.id} 
-                          className={`p-5 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                            a.isActive 
-                              ? 'bg-gray-900/90 border-gray-700 hover:border-gray-600' 
-                              : 'bg-gray-900/40 border-gray-800 opacity-75'
-                          }`}
-                        >
-                          <div className="space-y-1.5 flex-1 min-w-0">
-                            <div className="flex items-center gap-3 flex-wrap">
-                              {a.title ? (
+              <div className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 shadow-xl border border-gray-700/80">
+                <h2 className="text-lg font-bold text-white mb-4">
+                  {t('tab.assignments')} ({assignments.length})
+                </h2>
+
+                {loading ? (
+                  <div className="flex justify-center p-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-400"></div>
+                  </div>
+                ) : assignments.length === 0 ? (
+                  <p className="text-gray-500 text-center py-8 text-sm">
+                    {t('practice.no_assignments')}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {assignments.map((assignment) => (
+                      <div
+                        key={assignment.id}
+                        className={`p-5 rounded-2xl border transition-all flex flex-col justify-between ${
+                          assignment.isActive !== false
+                            ? 'bg-gray-900/80 border-gray-700 hover:border-gray-600 shadow-md'
+                            : 'bg-gray-900/40 border-gray-800 opacity-60'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-3 mb-2">
+                            <div className="min-w-0 flex-1">
+                              {assignment.title ? (
                                 <>
-                                  <h4 className="text-lg font-bold text-white">{a.title}</h4>
-                                  <span className="text-sm text-blue-400 font-mono bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-lg truncate max-w-xs" title={a.word}>
-                                    {a.word}
-                                  </span>
+                                  <h3 className="font-bold text-lg text-white truncate" title={assignment.title}>
+                                    {assignment.title}
+                                  </h3>
+                                  <p className="font-mono text-sm text-lime-400 font-bold mt-0.5 truncate">
+                                    {assignment.word}
+                                  </p>
                                 </>
                               ) : (
-                                <h4 className="text-lg font-bold text-blue-400 font-mono">{a.word}</h4>
-                              )}
-
-                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                a.isActive 
-                                  ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
-                                  : 'bg-gray-600/20 text-gray-400 border border-gray-600/30'
-                              }`}>
-                                {a.isActive ? '● Đang mở' : '○ Đã đóng'}
-                              </span>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-400">
-                              <p>Phoneme: <code className="text-gray-200 font-bold bg-gray-800 px-1.5 py-0.5 rounded">{a.targetPhoneme}</code></p>
-                              <p>Tối đa: <strong className="text-white">{a.maxAttempts}</strong> lần thử</p>
-                              {a.deadline && (
-                                <p>Hạn: <span className="text-yellow-400 font-medium">
-                                  {a.deadline.toDate ? a.deadline.toDate().toLocaleString('vi-VN') : new Date(a.deadline.seconds * 1000).toLocaleString('vi-VN')}
-                                </span></p>
+                                <h3 className="font-mono text-lg font-bold text-lime-400 truncate">
+                                  {assignment.word}
+                                </h3>
                               )}
                             </div>
-                          </div>
 
-                          {/* Action Buttons */}
-                          <div className="flex items-center gap-2 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-gray-800 justify-end">
-                            {/* Toggle Active Button */}
-                            <button
-                              onClick={() => handleToggleActive(a)}
-                              className={`p-2.5 rounded-xl border transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer ${
-                                a.isActive 
-                                  ? 'bg-gray-800 text-yellow-400 border-gray-700 hover:bg-yellow-400/10 hover:border-yellow-400/30' 
-                                  : 'bg-gray-800 text-green-400 border-gray-700 hover:bg-green-400/10 hover:border-green-400/30'
+                            <span
+                              className={`text-[11px] font-bold px-2.5 py-1 rounded-full border shrink-0 ${
+                                assignment.isActive !== false
+                                  ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                                  : 'bg-red-500/10 text-red-400 border-red-500/20'
                               }`}
-                              title={a.isActive ? 'Đóng bài tập này' : 'Mở lại bài tập này'}
                             >
-                              <Power className="w-4 h-4" />
-                              <span className="hidden sm:inline">{a.isActive ? 'Đóng' : 'Mở'}</span>
-                            </button>
+                              {assignment.isActive !== false ? t('assignment.status_open') : t('assignment.status_closed')}
+                            </span>
+                          </div>
 
-                            {/* Edit Button */}
-                            <button
-                              onClick={() => setEditingAssignment(a)}
-                              className="p-2.5 bg-gray-800 hover:bg-blue-600/20 text-gray-300 hover:text-blue-400 border border-gray-700 hover:border-blue-500/40 rounded-xl transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                              title="Chỉnh sửa bài tập"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                              <span className="hidden sm:inline">Sửa</span>
-                            </button>
-
-                            {/* Delete Button */}
-                            <button
-                              onClick={() => setDeletingAssignment(a)}
-                              className="p-2.5 bg-gray-800 hover:bg-red-600/20 text-gray-400 hover:text-red-400 border border-gray-700 hover:border-red-500/40 rounded-xl transition-all flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                              title="Xóa bài tập"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              <span className="hidden sm:inline">Xóa</span>
-                            </button>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-3">
+                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                              Phoneme: <strong className="text-white font-mono">{assignment.targetPhoneme}</strong>
+                            </span>
+                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                              Tối đa: <strong className="text-white">{assignment.maxAttempts} lượt</strong>
+                            </span>
+                            {assignment.deadline && (
+                              <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                                Hạn: {assignment.deadline.toDate().toLocaleDateString('vi-VN')}
+                              </span>
+                            )}
                           </div>
                         </div>
-                      ))}
 
-                      {assignments.length === 0 && (
-                        <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-8 text-center text-gray-500">
-                          Chưa có bài tập nào trong lớp học này.
+                        {/* Action buttons */}
+                        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-800/80">
+                          <button
+                            onClick={() => handleToggleActive(assignment)}
+                            className={`p-2 rounded-xl border text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer ${
+                              assignment.isActive !== false
+                                ? 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border-yellow-500/20'
+                                : 'bg-green-500/10 hover:bg-green-500/20 text-green-400 border-green-500/20'
+                            }`}
+                            title={assignment.isActive !== false ? t('assignment.toggle_close') : t('assignment.toggle_open')}
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            <span>{assignment.isActive !== false ? t('assignment.toggle_close') : t('assignment.toggle_open')}</span>
+                          </button>
+
+                          <button
+                            onClick={() => setEditingAssignment(assignment)}
+                            className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                            title={t('common.edit')}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>{t('common.edit')}</span>
+                          </button>
+
+                          <button
+                            onClick={() => setDeletingAssignment(assignment)}
+                            className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                            title={t('common.delete')}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>{t('common.delete')}</span>
+                          </button>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+            </div>
+          )}
 
-              {activeTab === 'config' && classData && (
-                <ScoringConfigComponent classId={classId} initialConfig={classData.scoringConfig} />
-              )}
+          {/* Tab 2: Scoring Config */}
+          {activeTab === 'config' && (
+            <div className="animate-in fade-in duration-200">
+              <ScoringConfigComponent classId={classId} initialConfig={classData?.scoringConfig} />
+            </div>
+          )}
 
-              {activeTab === 'submissions' && (
-                <SubmissionTable submissions={submissions} assignments={assignments} />
-              )}
+          {/* Tab 3: Submissions Table */}
+          {activeTab === 'submissions' && (
+            <div className="animate-in fade-in duration-200">
+              <SubmissionTable submissions={submissions} assignments={assignments} />
             </div>
           )}
         </div>
-      </div>
 
-      {/* Edit Assignment Modal */}
-      <EditAssignmentModal
-        classId={classId}
-        assignment={editingAssignment}
-        isOpen={Boolean(editingAssignment)}
-        onClose={() => setEditingAssignment(null)}
-        onUpdated={loadData}
-      />
+        {/* Edit Assignment Modal */}
+        <EditAssignmentModal
+          classId={classId}
+          assignment={editingAssignment}
+          isOpen={!!editingAssignment}
+          onClose={() => setEditingAssignment(null)}
+          onUpdated={loadData}
+        />
 
-      {/* Delete Confirmation Modal */}
-      {deletingAssignment && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in"
-          onClick={() => setDeletingAssignment(null)}
-        >
-          <div 
-            className="bg-gray-900 border border-gray-700 text-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-5"
-            onClick={e => e.stopPropagation()}
+        {/* Delete Confirmation Modal */}
+        {deletingAssignment && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in"
+            onClick={() => setDeletingAssignment(null)}
           >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-6 h-6" />
+            <div
+              className="bg-gray-900 border border-gray-700 text-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-4"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 text-red-400">
+                <div className="w-10 h-10 rounded-2xl bg-red-500/20 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-white">{t('assignment.delete_confirm_title')}</h3>
+                  <p className="text-xs text-gray-400 font-mono">{deletingAssignment.word}</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-bold text-white">Xác nhận xóa bài tập?</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Thao tác này không thể hoàn tác.</p>
+
+              <p className="text-xs text-gray-300 leading-relaxed">
+                {t('assignment.delete_confirm_desc')}
+              </p>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingAssignment(null)}
+                  className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-sm transition-colors cursor-pointer"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAssignment}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 cursor-pointer"
+                >
+                  {isDeleting ? t('common.processing') : t('common.delete')}
+                </button>
               </div>
-            </div>
-
-            <div className="bg-gray-800/80 p-4 rounded-2xl border border-gray-700/80 text-sm">
-              <p className="text-gray-300">
-                Bạn đang chuẩn bị xóa bài tập: <strong className="text-white">{deletingAssignment.title || deletingAssignment.word}</strong>
-              </p>
-              <p className="text-xs text-red-400/90 mt-2">
-                ⚠️ Lưu ý: Học sinh sẽ không còn thấy bài tập này trong danh sách làm bài nữa.
-              </p>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={() => setDeletingAssignment(null)}
-                className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium transition-colors cursor-pointer"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={handleDeleteAssignment}
-                className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-lg shadow-red-500/25 cursor-pointer"
-              >
-                {isDeleting ? 'Đang xóa...' : 'Xác nhận xóa'}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </main>
     </AuthGuard>
   );
 }

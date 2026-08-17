@@ -1,8 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { createAssignment } from '@/app/lib/firestore';
 import { Timestamp } from 'firebase/firestore';
+import { useLanguage } from '@/app/contexts/LanguageContext';
+import { useToast } from '@/app/contexts/ToastContext';
+import { PlusCircle, Sparkles } from 'lucide-react';
 
 interface AssignmentFormProps {
   classId: string;
@@ -10,6 +13,9 @@ interface AssignmentFormProps {
 }
 
 export default function AssignmentForm({ classId, onCreated }: AssignmentFormProps) {
+  const { t } = useLanguage();
+  const { success, error: toastError } = useToast();
+
   const [title, setTitle] = useState('');
   const [word, setWord] = useState('');
   const [targetPhoneme, setTargetPhoneme] = useState('');
@@ -36,81 +42,87 @@ export default function AssignmentForm({ classId, onCreated }: AssignmentFormPro
       setMaxAttempts(3);
       setDeadline('');
       setIsActive(true);
+      success(t('assignment.created_success'));
       onCreated();
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('Có lỗi xảy ra khi tạo bài tập');
+      toastError(error.message || 'Có lỗi xảy ra khi tạo bài tập');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-gray-900 p-6 rounded-2xl border border-gray-700 space-y-4">
-      <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-        <span className="text-blue-400">📝</span> Tạo bài tập mới
+    <form onSubmit={handleSubmit} className="bg-gray-800/90 p-5 sm:p-6 rounded-3xl border border-gray-700/80 space-y-4 shadow-xl">
+      <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+        <PlusCircle className="w-5 h-5 text-blue-400" />
+        {t('assignment.create_title')}
       </h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="md:col-span-2">
-          <label className="block text-sm font-medium text-gray-300 mb-1">
-            Tên bài tập <span className="text-xs text-gray-500 font-normal">(Tùy chọn - Giúp hiển thị gọn gàng trong danh sách)</span>
+          <label className="block text-xs font-bold text-gray-300 mb-1.5">
+            {t('assignment.name')} <span className="text-[11px] text-gray-500 font-normal">{t('assignment.name_hint')}</span>
           </label>
           <input
             type="text"
             value={title}
             onChange={e => setTitle(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            placeholder="VD: Bài 1 - Luyện đếm số từ 1 đến 10"
+            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm"
+            placeholder={t('assignment.name_placeholder')}
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">Từ / Câu cần đọc *</label>
+          <label className="block text-xs font-bold text-gray-300 mb-1.5">
+            {t('assignment.word')}
+          </label>
           <input
             type="text"
             required
             value={word}
             onChange={e => setWord(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            placeholder="VD: Schule hoặc eins zwei drei..."
+            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm font-mono"
+            placeholder={t('assignment.word_placeholder')}
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">
-            Phoneme mục tiêu * <span className="text-xs text-gray-500 font-normal">(nhập &#39;auto&#39; nếu là câu dài)</span>
+          <label className="block text-xs font-bold text-gray-300 mb-1.5">
+            {t('assignment.phoneme')} <span className="text-[11px] text-gray-500 font-normal">{t('assignment.phoneme_hint')}</span>
           </label>
           <input
             type="text"
             required
             value={targetPhoneme}
             onChange={e => setTargetPhoneme(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            placeholder="VD: ʃ hoặc sch hoặc auto"
+            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm font-mono"
+            placeholder="VD: ʃ hoặc auto"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">Số lần thử tối đa</label>
+          <label className="block text-xs font-bold text-gray-300 mb-1.5">
+            {t('assignment.max_attempts')}
+          </label>
           <input
             type="number"
             min={1}
             required
             value={maxAttempts}
             onChange={e => setMaxAttempts(Number(e.target.value))}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-400 text-sm"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">
-            Hạn chót <span className="text-xs text-gray-500 font-normal">(để trống nếu không giới hạn)</span>
+          <label className="block text-xs font-bold text-gray-300 mb-1.5">
+            {t('assignment.deadline')} <span className="text-[11px] text-gray-500 font-normal">{t('assignment.deadline_hint')}</span>
           </label>
           <input
             type="datetime-local"
             value={deadline}
             onChange={e => setDeadline(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-400 text-sm"
           />
         </div>
 
@@ -120,10 +132,10 @@ export default function AssignmentForm({ classId, onCreated }: AssignmentFormPro
             id="isActive"
             checked={isActive}
             onChange={e => setIsActive(e.target.checked)}
-            className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+            className="w-4 h-4 rounded border-gray-700 bg-gray-900 text-blue-500 focus:ring-blue-500 cursor-pointer"
           />
-          <label htmlFor="isActive" className="text-sm font-medium text-gray-300 cursor-pointer">
-            Đang mở (Học sinh có thể nhìn thấy và làm bài)
+          <label htmlFor="isActive" className="text-xs font-medium text-gray-300 cursor-pointer select-none">
+            {t('assignment.is_active')}
           </label>
         </div>
       </div>
@@ -131,9 +143,10 @@ export default function AssignmentForm({ classId, onCreated }: AssignmentFormPro
       <button
         type="submit"
         disabled={loading}
-        className="w-full mt-4 px-4 py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-500/25 cursor-pointer"
+        className="w-full mt-3 px-4 py-3 bg-blue-600 hover:bg-blue-500 active:scale-98 disabled:opacity-50 text-white font-bold rounded-2xl transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer text-sm"
       >
-        {loading ? 'Đang tạo...' : '+ Tạo bài tập mới'}
+        <Sparkles className="w-4 h-4" />
+        <span>{loading ? t('common.processing') : t('assignment.btn_create')}</span>
       </button>
     </form>
   );

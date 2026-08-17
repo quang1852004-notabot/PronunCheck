@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Mic, Square, Play, RotateCcw, Send, Upload } from 'lucide-react';
+import { Mic, Square, RotateCcw, Send, Upload } from 'lucide-react';
+import { useLanguage } from '@/app/contexts/LanguageContext';
+import { useToast } from '@/app/contexts/ToastContext';
 
 interface AudioRecorderProps {
   onAudioReady: (blob: Blob) => void;
@@ -9,6 +11,8 @@ interface AudioRecorderProps {
 }
 
 export default function AudioRecorder({ onAudioReady, disabled = false }: AudioRecorderProps) {
+  const { t } = useLanguage();
+  const { error: toastError } = useToast();
   const [isRecording, setIsRecording] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -21,7 +25,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 10 * 1024 * 1024) {
-        alert('File quá lớn. Vui lòng chọn file nhỏ hơn 10MB.');
+        toastError(t('recorder.file_too_large'));
         if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
@@ -36,15 +40,15 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
-      // Xác định định dạng hỗ trợ tốt nhất cho trình duyệt (Chrome vs Safari/iOS)
+      // Determine optimal mimeType for recording
       let options = {};
       let mimeType = '';
       if (typeof MediaRecorder.isTypeSupported === 'function') {
         const types = ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/aac'];
-        for (const t of types) {
-          if (MediaRecorder.isTypeSupported(t)) {
-            options = { mimeType: t };
-            mimeType = t;
+        for (const tType of types) {
+          if (MediaRecorder.isTypeSupported(tType)) {
+            options = { mimeType: tType };
+            mimeType = tType;
             break;
           }
         }
@@ -61,7 +65,6 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
       };
 
       recorder.onstop = () => {
-        // Sử dụng đúng mimeType đã record thay vì hardcode audio/webm
         const blobType = mimeType || recorder.mimeType || 'audio/webm';
         const blob = new Blob(audioChunksRef.current, { type: blobType });
         setRecordedBlob(blob);
@@ -74,7 +77,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
       setAudioUrl(null);
     } catch (err) {
       console.error(err);
-      alert('Không thể truy cập Microphone. Vui lòng cấp quyền micro cho trình duyệt.');
+      toastError(t('recorder.mic_permission_error'));
     }
   };
 
@@ -104,28 +107,28 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
   };
 
   return (
-    <div className="flex flex-col items-center gap-4 p-4 bg-gray-800 rounded-xl border border-gray-700">
+    <div className="flex flex-col items-center gap-4 p-5 bg-gray-900/60 rounded-2xl border border-gray-700/80">
       {!isRecording && !recordedBlob && (
-        <div className="flex flex-col sm:flex-row items-center gap-4">
+        <div className="flex flex-col sm:flex-row items-center gap-3">
           <button
             type="button"
             onClick={startRecording}
             disabled={disabled}
-            className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all ${
+            className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all cursor-pointer ${
               disabled
-                ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                : 'bg-red-500 hover:bg-red-600 hover:scale-105'
+                ? 'bg-gray-700 cursor-not-allowed opacity-50'
+                : 'bg-red-500 hover:bg-red-600 active:scale-95 shadow-red-500/20'
             }`}
           >
-            <Mic className="w-5 h-5" /> Bắt đầu ghi âm
+            <Mic className="w-5 h-5" /> {t('recorder.start')}
           </button>
 
-          <span className="text-gray-400 font-medium">hoặc</span>
+          <span className="text-gray-400 font-medium text-xs sm:text-sm">{t('common.or')}</span>
 
           <label className={`flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white shadow-lg transition-all cursor-pointer ${
-            disabled ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-blue-500 hover:bg-blue-600 hover:scale-105'
+            disabled ? 'bg-gray-700 cursor-not-allowed opacity-50' : 'bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-blue-500/20'
           }`}>
-            <Upload className="w-5 h-5" /> Tải file lên
+            <Upload className="w-5 h-5" /> {t('recorder.upload_file')}
             <input 
               type="file" 
               accept="audio/*" 
@@ -140,39 +143,39 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
       {isRecording && (
         <div className="flex flex-col items-center gap-3">
-          <div className="flex items-center gap-2 text-red-400 font-semibold animate-pulse">
+          <div className="flex items-center gap-2 text-red-400 font-semibold animate-pulse text-sm">
             <span className="w-3 h-3 bg-red-500 rounded-full animate-ping"></span>
-            Đang ghi âm...
+            {t('recorder.recording')}
           </div>
           <button
             type="button"
             onClick={stopRecording}
-            className="flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white bg-gray-700 hover:bg-gray-600 transition-all border border-gray-600"
+            className="flex items-center gap-2 px-6 py-3 rounded-full font-bold text-white bg-gray-800 hover:bg-gray-700 active:scale-95 transition-all border border-gray-600 shadow-xl cursor-pointer"
           >
-            <Square className="w-5 h-5 text-red-400 fill-current" /> Dừng ghi âm
+            <Square className="w-4 h-4 text-red-400 fill-current" /> {t('recorder.stop')}
           </button>
         </div>
       )}
 
       {recordedBlob && audioUrl && (
         <div className="flex flex-col items-center gap-4 w-full">
-          <audio src={audioUrl} controls className="w-full max-w-sm rounded-lg" />
+          <audio src={audioUrl} controls className="w-full max-w-sm rounded-xl" />
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={resetRecording}
               disabled={disabled}
-              className="flex items-center gap-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" /> Ghi âm lại
+              <RotateCcw className="w-4 h-4" /> {t('recorder.re_record')}
             </button>
             <button
               type="button"
               onClick={handleSubmit}
               disabled={disabled}
-              className="flex items-center gap-1 px-6 py-2 bg-lime-500 hover:bg-lime-600 text-gray-900 font-bold rounded-lg text-sm shadow-md transition-colors"
+              className="flex items-center gap-1.5 px-6 py-2.5 bg-lime-400 hover:bg-lime-300 text-gray-950 font-extrabold rounded-xl text-xs shadow-lg shadow-lime-500/20 transition-all active:scale-95 cursor-pointer"
             >
-              <Send className="w-4 h-4" /> Chấm điểm ngay
+              <Send className="w-4 h-4" /> {t('recorder.submit_grade')}
             </button>
           </div>
         </div>

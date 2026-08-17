@@ -193,6 +193,12 @@ export async function joinClass(classId: string, studentId: string, studentEmail
   }, { merge: true });
 }
 
+export async function isClassMember(classId: string, studentId: string): Promise<boolean> {
+  const docRef = doc(db, 'class_members', `${classId}_${studentId}`);
+  const snap = await getDoc(docRef);
+  return snap.exists();
+}
+
 export async function getJoinedClasses(studentId: string): Promise<(ClassData & { joinedAt?: any })[]> {
   const q = query(collection(db, 'class_members'), where('studentId', '==', studentId));
   const snap = await getDocs(q);

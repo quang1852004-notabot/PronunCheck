@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { updateAssignment, AssignmentData } from '@/app/lib/firestore';
 import { Timestamp } from 'firebase/firestore';
+import { useLanguage } from '@/app/contexts/LanguageContext';
+import { useToast } from '@/app/contexts/ToastContext';
 import { X, Save, Edit3 } from 'lucide-react';
 
 interface EditAssignmentModalProps {
@@ -38,6 +40,9 @@ function EditAssignmentForm({
   onClose: () => void;
   onUpdated: () => void;
 }) {
+  const { t } = useLanguage();
+  const { success, error: toastError } = useToast();
+
   const [title, setTitle] = useState(assignment.title || '');
   const [word, setWord] = useState(assignment.word || '');
   const [targetPhoneme, setTargetPhoneme] = useState(assignment.targetPhoneme || '');
@@ -59,11 +64,12 @@ function EditAssignmentForm({
         deadline: deadline ? Timestamp.fromDate(new Date(deadline)) : null,
         isActive
       });
+      success(t('assignment.updated_success'));
       onUpdated();
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating assignment:', error);
-      alert('Có lỗi xảy ra khi cập nhật bài tập.');
+      toastError(error.message || 'Có lỗi xảy ra khi cập nhật bài tập.');
     } finally {
       setLoading(false);
     }
@@ -85,7 +91,7 @@ function EditAssignmentForm({
               <Edit3 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white">Chỉnh sửa bài tập</h2>
+              <h2 className="text-xl font-bold text-white">{t('assignment.edit_title')}</h2>
               <p className="text-xs text-gray-400">ID: {assignment.id}</p>
             </div>
           </div>
@@ -101,96 +107,102 @@ function EditAssignmentForm({
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Tên bài tập <span className="text-xs text-gray-500 font-normal">(Tùy chọn)</span>
+            <label className="block text-xs font-bold text-gray-300 mb-1.5">
+              {t('assignment.name')} <span className="text-[11px] text-gray-500 font-normal">{t('assignment.name_hint')}</span>
             </label>
             <input
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              placeholder="VD: Bài 1 - Luyện đếm số từ 1 đến 10"
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm"
+              placeholder={t('assignment.name_placeholder')}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Từ / Câu cần đọc *</label>
+            <label className="block text-xs font-bold text-gray-300 mb-1.5">
+              {t('assignment.word')}
+            </label>
             <input
               type="text"
               required
               value={word}
               onChange={e => setWord(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              placeholder="VD: Schule hoặc eins zwei drei..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm font-mono"
+              placeholder={t('assignment.word_placeholder')}
             />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Phoneme mục tiêu *</label>
+              <label className="block text-xs font-bold text-gray-300 mb-1.5">
+                {t('assignment.phoneme')}
+              </label>
               <input
                 type="text"
                 required
                 value={targetPhoneme}
                 onChange={e => setTargetPhoneme(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-sm font-mono"
                 placeholder="VD: ʃ hoặc auto"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Số lần thử tối đa</label>
+              <label className="block text-xs font-bold text-gray-300 mb-1.5">
+                {t('assignment.max_attempts')}
+              </label>
               <input
                 type="number"
                 min={1}
                 required
                 value={maxAttempts}
                 onChange={e => setMaxAttempts(Number(e.target.value))}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-400 text-sm"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Hạn chót <span className="text-xs text-gray-500 font-normal">(để trống nếu không giới hạn)</span>
+            <label className="block text-xs font-bold text-gray-300 mb-1.5">
+              {t('assignment.deadline')} <span className="text-[11px] text-gray-500 font-normal">{t('assignment.deadline_hint')}</span>
             </label>
             <input
               type="datetime-local"
               value={deadline}
               onChange={e => setDeadline(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-400 text-sm"
             />
           </div>
 
-          <div className="flex items-center space-x-2 pt-2">
+          <div className="flex items-center space-x-2 pt-1">
             <input
               type="checkbox"
               id="editIsActive"
               checked={isActive}
               onChange={e => setIsActive(e.target.checked)}
-              className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-gray-900 cursor-pointer"
+              className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500 cursor-pointer"
             />
-            <label htmlFor="editIsActive" className="text-sm font-medium text-gray-300 cursor-pointer">
-              Đang mở (Học sinh có thể nhìn thấy và làm bài)
+            <label htmlFor="editIsActive" className="text-xs font-medium text-gray-300 cursor-pointer select-none">
+              {t('assignment.is_active')}
             </label>
           </div>
 
-          <div className="flex gap-3 pt-4 border-t border-gray-800">
+          <div className="flex gap-3 pt-3 border-t border-gray-800">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium transition-colors cursor-pointer"
+              className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-xs transition-colors cursor-pointer"
             >
-              Hủy
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer"
+              className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:scale-98 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer"
             >
               <Save className="w-4 h-4" />
-              {loading ? 'Đang lưu...' : 'Lưu thay đổi'}
+              <span>{loading ? t('common.processing') : t('assignment.btn_save')}</span>
             </button>
           </div>
         </form>
