@@ -59,12 +59,20 @@ export default function FreeModePage() {
       formData.append('target_phoneme', 'auto');
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
-      const res = await fetch(`${apiUrl}/api/v1/assess`, {
-        method: 'POST',
-        body: formData,
-      });
+      let res;
+      try {
+        res = await fetch(`${apiUrl}/api/v1/assess`, {
+          method: 'POST',
+          body: formData,
+        });
+      } catch (fetchErr: any) {
+        throw new Error('Không thể kết nối đến máy chủ AI (api.thuy-tien.pro đang offline hoặc gặp lỗi 502 Bad Gateway). Vui lòng khởi động lại VM Backend trên Google Cloud!');
+      }
 
       if (!res.ok) {
+        if (res.status === 502 || res.status === 503) {
+          throw new Error('Máy chủ chấm điểm AI (GCP VM) hiện đang tạm dừng hoặc chưa khởi động service FastAPI (Mã lỗi 502 Bad Gateway). Vui lòng bật lại server!');
+        }
         throw new Error(`Máy chủ trả về mã lỗi ${res.status}`);
       }
 

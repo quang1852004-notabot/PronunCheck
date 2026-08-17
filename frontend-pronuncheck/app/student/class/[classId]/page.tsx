@@ -192,13 +192,21 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       }
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
-      const res = await fetch(`${apiUrl}/api/v1/assess`, {
-        method: 'POST',
-        body: formData,
-      });
+      let res;
+      try {
+        res = await fetch(`${apiUrl}/api/v1/assess`, {
+          method: 'POST',
+          body: formData,
+        });
+      } catch (fetchErr: any) {
+        throw new Error('Không thể kết nối đến máy chủ AI (api.thuy-tien.pro đang offline hoặc gặp lỗi 502 Bad Gateway). Vui lòng khởi động lại VM Backend trên Google Cloud!');
+      }
 
       if (!res.ok) {
-        throw new Error(`Máy chủ trả về mã lỗi ${res.status}`);
+        if (res.status === 502 || res.status === 503) {
+          throw new Error('Máy chủ chấm điểm AI (GCP VM) hiện đang tạm dừng hoặc chưa khởi động service FastAPI (Mã lỗi 502 Bad Gateway). Vui lòng bật lại server!');
+        }
+        throw new Error(`Máy chủ chấm điểm AI trả về mã lỗi ${res.status}`);
       }
 
       const data = await res.json();
@@ -423,11 +431,11 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                             <div className="space-y-1">
                               {assignment.title ? (
                                 <>
-                                  <h3 className="text-xl sm:text-2xl font-extrabold text-white">{assignment.title}</h3>
-                                  <p className="text-base font-mono text-lime-400 font-bold">{assignment.word}</p>
+                                  <h3 className="text-xl sm:text-2xl font-extrabold text-white font-sans">{assignment.title}</h3>
+                                  <p className="text-base font-sans text-lime-400 font-bold tracking-wide">{assignment.word}</p>
                                 </>
                               ) : (
-                                <h3 className="text-2xl font-bold text-white font-mono">{assignment.word}</h3>
+                                <h3 className="text-2xl font-bold text-white font-sans">{assignment.word}</h3>
                               )}
                               <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-400 pt-1">
                                 <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
