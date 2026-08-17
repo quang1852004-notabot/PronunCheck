@@ -185,133 +185,133 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
           </div>
 
           {/* Tab 1: Assignments */}
-          {activeTab === 'assignments' && (
-            <div className="space-y-6 animate-in fade-in duration-200">
-              <AssignmentForm classId={classId} onCreated={loadData} />
+          <div className={activeTab === 'assignments' ? 'space-y-6 animate-in fade-in duration-200' : 'hidden'}>
+            <AssignmentForm classId={classId} onCreated={loadData} />
 
-              <div className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 shadow-xl border border-gray-700/80">
-                <h2 className="text-lg font-bold text-white mb-4">
-                  {t('tab.assignments')} ({assignments.length})
-                </h2>
+            <div className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 shadow-xl border border-gray-700/80">
+              <h2 className="text-lg font-bold text-white mb-4">
+                {t('tab.assignments')} ({assignments.length})
+              </h2>
 
-                {loading ? (
-                  <div className="flex justify-center p-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-400"></div>
-                  </div>
-                ) : assignments.length === 0 ? (
-                  <p className="text-gray-500 text-center py-8 text-sm">
-                    {t('practice.no_assignments')}
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {assignments.map((assignment) => (
-                      <div
-                        key={assignment.id}
-                        className={`p-5 rounded-2xl border transition-all flex flex-col justify-between ${
-                          assignment.isActive !== false
-                            ? 'bg-gray-900/80 border-gray-700 hover:border-gray-600 shadow-md'
-                            : 'bg-gray-900/40 border-gray-800 opacity-60'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-start justify-between gap-3 mb-2">
-                            <div className="min-w-0 flex-1">
-                              {assignment.title ? (
-                                <>
-                                  <h3 className="font-bold text-lg text-white truncate" title={assignment.title}>
-                                    {assignment.title}
-                                  </h3>
-                                  <p className="font-mono text-sm text-lime-400 font-bold mt-0.5 truncate">
-                                    {assignment.word}
-                                  </p>
-                                </>
-                              ) : (
-                                <h3 className="font-mono text-lg font-bold text-lime-400 truncate">
-                                  {assignment.word}
+              {loading ? (
+                <div className="flex justify-center p-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-400"></div>
+                </div>
+              ) : assignments.length === 0 ? (
+                <p className="text-gray-500 text-center py-8 text-sm">
+                  {t('practice.no_assignments')}
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {assignments.map((assignment) => (
+                    <div
+                      key={assignment.id}
+                      className={`p-5 rounded-2xl border transition-all flex flex-col justify-between ${
+                        assignment.isActive !== false
+                          ? 'bg-gray-900/80 border-gray-700 hover:border-gray-600 shadow-md'
+                          : 'bg-gray-900/40 border-gray-800 opacity-60'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div className="min-w-0 flex-1">
+                            {assignment.title ? (
+                              <>
+                                <h3 className="font-bold text-lg text-white truncate font-sans" title={assignment.title}>
+                                  {assignment.title}
                                 </h3>
-                              )}
-                            </div>
-
-                            <span
-                              className={`text-[11px] font-bold px-2.5 py-1 rounded-full border shrink-0 ${
-                                assignment.isActive !== false
-                                  ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                                  : 'bg-red-500/10 text-red-400 border-red-500/20'
-                              }`}
-                            >
-                              {assignment.isActive !== false ? t('assignment.status_open') : t('assignment.status_closed')}
-                            </span>
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-3">
-                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
-                              Phoneme: <strong className="text-white font-mono">{assignment.targetPhoneme}</strong>
-                            </span>
-                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
-                              Tối đa: <strong className="text-white">{assignment.maxAttempts} lượt</strong>
-                            </span>
-                            {assignment.deadline && (
-                              <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
-                                Hạn: {assignment.deadline.toDate().toLocaleDateString('vi-VN')}
-                              </span>
+                                <p className="font-sans text-sm text-lime-400 font-bold mt-0.5 truncate tracking-wide">
+                                  {assignment.word}
+                                </p>
+                              </>
+                            ) : (
+                              <h3 className="font-sans text-lg font-bold text-lime-400 truncate tracking-wide">
+                                {assignment.word}
+                              </h3>
                             )}
                           </div>
+
+                          <span
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-full border shrink-0 ${
+                              assignment.isActive !== false
+                                ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                                : 'bg-red-500/10 text-red-400 border-red-500/20'
+                            }`}
+                          >
+                            {assignment.isActive !== false ? t('assignment.status_open') : t('assignment.status_closed')}
+                          </span>
                         </div>
 
-                        {/* Action buttons */}
-                        <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-800/80">
-                          <button
-                            onClick={() => handleToggleActive(assignment)}
-                            className={`p-2 rounded-xl border text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer ${
-                              assignment.isActive !== false
-                                ? 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border-yellow-500/20'
-                                : 'bg-green-500/10 hover:bg-green-500/20 text-green-400 border-green-500/20'
-                            }`}
-                            title={assignment.isActive !== false ? t('assignment.toggle_close') : t('assignment.toggle_open')}
-                          >
-                            <Power className="w-3.5 h-3.5" />
-                            <span>{assignment.isActive !== false ? t('assignment.toggle_close') : t('assignment.toggle_open')}</span>
-                          </button>
-
-                          <button
-                            onClick={() => setEditingAssignment(assignment)}
-                            className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
-                            title={t('common.edit')}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            <span>{t('common.edit')}</span>
-                          </button>
-
-                          <button
-                            onClick={() => setDeletingAssignment(assignment)}
-                            className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
-                            title={t('common.delete')}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>{t('common.delete')}</span>
-                          </button>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-3">
+                          <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                            Phoneme: <strong className="text-white font-mono">{assignment.targetPhoneme}</strong>
+                          </span>
+                          <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                            Tối đa: <strong className="text-white">{assignment.maxAttempts} lượt</strong>
+                          </span>
+                          {assignment.deadline && (
+                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                              Hạn: {assignment.deadline.toDate().toLocaleDateString('vi-VN')}
+                            </span>
+                          )}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-gray-800/80">
+                        <button
+                          onClick={() => handleToggleActive(assignment)}
+                          className={`p-2 rounded-xl border text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer ${
+                            assignment.isActive !== false
+                              ? 'bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border-yellow-500/20'
+                              : 'bg-green-500/10 hover:bg-green-500/20 text-green-400 border-green-500/20'
+                          }`}
+                          title={assignment.isActive !== false ? t('assignment.toggle_close') : t('assignment.toggle_open')}
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                          <span>{assignment.isActive !== false ? t('assignment.toggle_close') : t('assignment.toggle_open')}</span>
+                        </button>
+
+                        <button
+                          onClick={() => setEditingAssignment(assignment)}
+                          className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                          title={t('common.edit')}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>{t('common.edit')}</span>
+                        </button>
+
+                        <button
+                          onClick={() => setDeletingAssignment(assignment)}
+                          className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                          title={t('common.delete')}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{t('common.delete')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Tab 2: Scoring Config */}
-          {activeTab === 'config' && (
-            <div className="animate-in fade-in duration-200">
-              <ScoringConfigComponent classId={classId} initialConfig={classData?.scoringConfig} />
-            </div>
-          )}
+          <div className={activeTab === 'config' ? 'animate-in fade-in duration-200' : 'hidden'}>
+            <ScoringConfigComponent 
+              classId={classId} 
+              initialConfig={classData?.scoringConfig} 
+              onSaved={(newConfig) => {
+                setClassData(prev => prev ? { ...prev, scoringConfig: newConfig } : null);
+              }}
+            />
+          </div>
 
           {/* Tab 3: Submissions Table */}
-          {activeTab === 'submissions' && (
-            <div className="animate-in fade-in duration-200">
-              <SubmissionTable submissions={submissions} assignments={assignments} />
-            </div>
-          )}
+          <div className={activeTab === 'submissions' ? 'animate-in fade-in duration-200' : 'hidden'}>
+            <SubmissionTable submissions={submissions} assignments={assignments} />
+          </div>
         </div>
 
         {/* Edit Assignment Modal */}
