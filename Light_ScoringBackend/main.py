@@ -3,11 +3,13 @@
                     PRONUNCHECK FASTAPI BACKEND SERVICE
 ================================================================================
 Dự án: DT3_PronunCheck
-Mục đích:
+Thành phần: Light Scoring Backend (FastAPI + Wav2Vec2 + Faster-Whisper + F0 DTW)
+
+Quy trình hoạt động:
   - Cung cấp REST API đánh giá phát âm tiếng Đức (/api/v1/assess).
   - Tích hợp mô hình Hybrid AI chạy song song đa luồng (ThreadPoolExecutor):
       1. Wav2Vec2 (CTC Forced Alignment / Phoneme-level scoring + German Phonetics)
-      2. Faster-Whisper Tiny (ASR word-level completeness factor x_soft)
+      2. Faster-Whisper Tiny (ASR word-level completeness factor)
       3. F0 + FastDTW (Pitch contour intonation matching với Google TTS)
   - Tổng hợp kết quả và trả về điểm số chi tiết từng ký tự/âm tiết cho Frontend.
 ================================================================================
@@ -18,6 +20,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
+import sys
 import uuid
 import numpy as np
 import torch
@@ -25,9 +28,12 @@ from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import traceback
 
-# Import cấu hình tập trung và module chấm điểm
-import config
-import scoring
+# Hỗ trợ cả import trực tiếp lẫn import theo package
+try:
+    from . import config, scoring
+except ImportError:
+    import config
+    import scoring
 
 # Thư viện mô hình AI
 from faster_whisper import WhisperModel

@@ -6,7 +6,8 @@ Module chuyên trách phân tích và xử lý các quy tắc ngữ âm tiếng 
   1. Cặp âm Ich-Laut (/ç/) vs Ach-Laut (/x/).
   2. Hiện tượng vô thanh hóa phụ âm cuối (Auslautverhärtung: d->t, b->p, g->k, ig->iç).
   3. Độ dài nguyên âm (Long vs Short Vowels) và đánh giá thời lượng (Duration Score).
-  4. Bộ sinh lời khuyên sư phạm (Pedagogical Feedback Generator).
+  4. Chuẩn hóa số và chữ tiếng Đức (German Text & Number Normalizer).
+  5. Bộ sinh lời khuyên sư phạm (Pedagogical Feedback Generator).
 ================================================================================
 """
 

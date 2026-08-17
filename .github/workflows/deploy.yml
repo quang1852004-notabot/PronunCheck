@@ -26,7 +26,7 @@ jobs:
             
             echo "--- [2/3] Cài đặt & cập nhật dependencies Backend ---"
             source venv/bin/activate
-            pip install -r requirements.txt
+            pip install -r Light_ScoringBackend/requirements.txt
             
             echo "--- [3/3] Khởi động lại service Backend (FastAPI / AI) ---"
             sudo systemctl restart pronuncheck-backend

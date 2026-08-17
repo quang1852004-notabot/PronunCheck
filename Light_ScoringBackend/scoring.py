@@ -12,6 +12,7 @@ Kiến trúc Chấm điểm Sơ cấp (Light Tier) kết hợp:
 """
 
 import os
+import sys
 import difflib
 from collections import Counter
 from typing import Dict, List, Tuple, Optional, Any
@@ -26,21 +27,36 @@ import io
 import soundfile as sf
 import gtts
 
-import config
-import german_phonetics
+try:
+    from google.cloud import texttospeech
+except ImportError:
+    texttospeech = None
+
+# Hỗ trợ cả import trực tiếp lẫn import theo package
+try:
+    from . import config, german_phonetics
+except ImportError:
+    import config
+    import german_phonetics
 
 # Tự động phát hiện và nạp Service Account Key cho Google Cloud TTS API
-base_dir = os.path.dirname(__file__)
+base_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(base_dir, ".."))
+
 potential_keys = [
     os.path.join(base_dir, "google_key.json"),
-    os.path.join(base_dir, "pronuncheck-504621-b900ded86d5c.json")
+    os.path.join(parent_dir, "google_key.json"),
+    os.path.join(parent_dir, "secret_key", "google_key.json")
 ]
-# Quét thêm các file json secret nếu có
-for f in os.listdir(base_dir):
-    if f.endswith(".json") and (f.startswith("pronuncheck-") or "key" in f.lower()):
-        full_p = os.path.join(base_dir, f)
-        if full_p not in potential_keys:
-            potential_keys.append(full_p)
+
+# Quét thêm các file json secret nếu có ở base_dir, parent_dir, secret_key
+for scan_dir in [base_dir, parent_dir, os.path.join(parent_dir, "secret_key")]:
+    if os.path.exists(scan_dir):
+        for f in os.listdir(scan_dir):
+            if f.endswith(".json") and (f.startswith("pronuncheck-") or "key" in f.lower()):
+                full_p = os.path.join(scan_dir, f)
+                if full_p not in potential_keys:
+                    potential_keys.append(full_p)
 
 for kp in potential_keys:
     if os.path.exists(kp):
@@ -66,38 +82,42 @@ def get_reference_audio(expected_text: str) -> Optional[str]:
     if not clean_name:
         clean_name = "ref_sample"
         
+    os.makedirs(config.REFERENCE_AUDIO_DIR, exist_ok=True)
     ref_path = os.path.join(config.REFERENCE_AUDIO_DIR, f"{clean_name}.wav")
     
     if os.path.exists(ref_path):
         return ref_path
         
     # 1. Thử gọi Google Cloud Text-to-Speech API cao cấp (Neural2-B)
-    try:
-        client = texttospeech.TextToSpeechClient()
-        synthesis_input = texttospeech.SynthesisInput(text=expected_text)
-        voice = texttospeech.VoiceSelectionParams(language_code="de-DE", name="de-DE-Neural2-B")
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.LINEAR16, 
-            sample_rate_hertz=16000
-        )
-        
-        response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
-        with open(ref_path, "wb") as out:
-            out.write(response.audio_content)
-        return ref_path
-    except Exception as e_cloud:
-        # 2. Tự động chuyển sang gTTS (miễn phí, không cần key) nếu không có GCP Key
+    if texttospeech is not None:
         try:
-            tts = gtts.gTTS(text=expected_text, lang="de")
-            mp3_fp = io.BytesIO()
-            tts.write_to_fp(mp3_fp)
-            mp3_fp.seek(0)
-            y, sr = librosa.load(mp3_fp, sr=16000)
-            sf.write(ref_path, y, 16000)
+            client = texttospeech.TextToSpeechClient()
+            synthesis_input = texttospeech.SynthesisInput(text=expected_text)
+            voice = texttospeech.VoiceSelectionParams(language_code="de-DE", name="de-DE-Neural2-B")
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.LINEAR16, 
+                sample_rate_hertz=16000
+            )
+            
+            response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
+            with open(ref_path, "wb") as out:
+                out.write(response.audio_content)
             return ref_path
-        except Exception as e_gtts:
-            print(f"TTS Synthesizer Fallback Error: {e_gtts}", flush=True)
-            return None
+        except Exception:
+            pass  # Tự động chuyển fallback sang gTTS
+
+    # 2. Tự động chuyển sang gTTS (miễn phí, không cần key) nếu không có GCP Key
+    try:
+        tts = gtts.gTTS(text=expected_text, lang="de")
+        mp3_fp = io.BytesIO()
+        tts.write_to_fp(mp3_fp)
+        mp3_fp.seek(0)
+        y, sr = librosa.load(mp3_fp, sr=16000)
+        sf.write(ref_path, y, 16000)
+        return ref_path
+    except Exception as e_gtts:
+        print(f"TTS Synthesizer Fallback Error: {e_gtts}", flush=True)
+        return None
 
 
 # ==============================================================================

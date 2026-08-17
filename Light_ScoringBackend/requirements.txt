@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+torch
+torchaudio
+transformers
+faster-whisper
+librosa
+fastdtw
+google-cloud-texttospeech
+gTTS
+soundfile
