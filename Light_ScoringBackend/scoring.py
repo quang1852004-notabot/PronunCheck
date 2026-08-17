@@ -237,7 +237,10 @@ def analyze_with_whisper(audio_array: np.ndarray, expected_text: str, whisper_mo
             beam_size=5,
             language="de",
             word_timestamps=False,
-            condition_on_previous_text=False
+            condition_on_previous_text=False,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=400),
+            initial_prompt=f"Ausspracheübung auf Deutsch: {expected_text}"
         )
         
         raw_transcription = " ".join([seg.text.strip() for seg in segments_gen]).strip()

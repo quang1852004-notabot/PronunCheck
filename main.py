@@ -25,28 +25,32 @@ from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import traceback
 
-# Import Sentry SDK cho Giám sát lỗi Backend thời gian thực
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.starlette import StarletteIntegration
-
 # Import cấu hình và module chấm điểm từ package Light_ScoringBackend
 import config
 from Light_ScoringBackend import scoring, german_phonetics
 
-# Khởi tạo Sentry SDK nếu SENTRY_DSN được định nghĩa
-if config.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=config.SENTRY_DSN,
-        environment=config.ENVIRONMENT,
-        integrations=[
-            FastApiIntegration(),
-            StarletteIntegration(),
-        ],
-        traces_sample_rate=config.SENTRY_TRACES_SAMPLE_RATE,
-        send_default_pii=True,  # Bật full dump theo yêu cầu của người dùng để debug tối đa
-    )
-    print(f"Sentry Backend SDK initialized (Env: {config.ENVIRONMENT}).", flush=True)
+# Khởi tạo Sentry SDK (an toàn, không crash nếu chưa pip install)
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    if getattr(config, "SENTRY_DSN", None):
+        sentry_sdk.init(
+            dsn=config.SENTRY_DSN,
+            environment=getattr(config, "ENVIRONMENT", "production"),
+            integrations=[
+                FastApiIntegration(),
+                StarletteIntegration(),
+            ],
+            traces_sample_rate=getattr(config, "SENTRY_TRACES_SAMPLE_RATE", 1.0),
+            send_default_pii=True,
+        )
+        print(f"Sentry Backend SDK initialized (Env: {getattr(config, 'ENVIRONMENT', 'production')}).", flush=True)
+except ImportError:
+    print("Warning: sentry-sdk not installed. Continuing without Sentry monitoring.", flush=True)
+except Exception as e:
+    print(f"Warning: Sentry init failed ({e}). Continuing without Sentry.", flush=True)
 
 # Thư viện mô hình AI
 from faster_whisper import WhisperModel

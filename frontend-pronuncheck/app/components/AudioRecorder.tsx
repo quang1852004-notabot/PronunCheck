@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Square, RotateCcw, Send, Upload, Timer } from 'lucide-react';
+import { Mic, Square, RotateCcw, Send, Upload, Timer, Sparkles, Activity } from 'lucide-react';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import AudioLevelMeter from '@/app/components/AudioLevelMeter';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
+import { createRnnoiseNode } from '@/app/lib/rnnoise';
 
 interface AudioRecorderProps {
   onAudioReady: (blob: Blob) => void;
@@ -17,14 +18,17 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
   const { error: toastError } = useToast();
   
   const [isRecording, setIsRecording] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -49,6 +53,29 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
     };
   }, [isRecording]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopPreviewStream();
+      cleanupAudioContext();
+    };
+  }, []);
+
+  const cleanupAudioContext = () => {
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+  };
+
+  const stopPreviewStream = () => {
+    if (previewStream) {
+      previewStream.getTracks().forEach(track => track.stop());
+      setPreviewStream(null);
+    }
+    setIsPreviewing(false);
+  };
+
   const formatTimer = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
@@ -63,23 +90,114 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
+      stopPreviewStream();
       setRecordedBlob(file);
       setAudioUrl(URL.createObjectURL(file));
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
+  // Pre-flight Mic Check
+  const togglePreview = async () => {
+    if (isPreviewing) {
+      stopPreviewStream();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        }
+      });
+      setPreviewStream(stream);
+      setIsPreviewing(true);
+    } catch (err) {
+      console.error(err);
+      toastError(t('recorder.mic_permission_error'));
+    }
+  };
+
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 1. Tận dụng hoặc xin quyền stream với WebRTC Audio Constraints
+      let stream = previewStream;
+      if (!stream || !stream.active) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          }
+        });
+      }
+      
       streamRef.current = stream;
       setActiveStream(stream);
-      
-      // Determine optimal mimeType for recording
+      stopPreviewStream(); // Tắt chế độ preview độc lập để vào ghi âm chính thức
+
+      // 2. Thiết lập Web Audio API DSP + RNNoise AI Worklet Pipeline
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      audioContextRef.current = audioCtx;
+
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
+      const sourceNode = audioCtx.createMediaStreamSource(stream);
+
+      // High-Pass Filter 85Hz: Cắt rung quạt / ù điện lưới
+      const highPassFilter = audioCtx.createBiquadFilter();
+      highPassFilter.type = 'highpass';
+      highPassFilter.frequency.value = 85;
+      highPassFilter.Q.value = 0.707;
+
+      // Dynamics Compressor: Chống rè vỡ âm (clipping)
+      const compressor = audioCtx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 20;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.15;
+
+      const destination = audioCtx.createMediaStreamDestination();
+
+      // Nạp mô hình RNNoise AI (WASM AudioWorklet)
+      const rnnoiseNode = await createRnnoiseNode(audioCtx);
+
+      if (rnnoiseNode) {
+        // Luồng lọc ồn AI: Mic -> RNNoise AI -> HighPass -> Compressor -> Destination
+        sourceNode.connect(rnnoiseNode);
+        rnnoiseNode.connect(highPassFilter);
+      } else {
+        // Luồng fallback DSP: Mic -> HighPass -> Compressor -> Destination
+        sourceNode.connect(highPassFilter);
+      }
+
+      highPassFilter.connect(compressor);
+      compressor.connect(destination);
+
+      // Sử dụng stream đã qua lọc ồn AI để ghi âm
+      const recordStream = destination.stream && destination.stream.getAudioTracks().length > 0
+        ? destination.stream
+        : stream;
+
+      // Xác định định dạng ghi âm tối ưu
       let options = {};
       let mimeType = '';
       if (typeof MediaRecorder.isTypeSupported === 'function') {
-        const types = ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/aac'];
+        const types = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/mpeg',
+          'audio/aac'
+        ];
         for (const tType of types) {
           if (MediaRecorder.isTypeSupported(tType)) {
             options = { mimeType: tType };
@@ -89,7 +207,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         }
       }
 
-      const recorder = new MediaRecorder(stream, options);
+      const recorder = new MediaRecorder(recordStream, options);
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
 
@@ -105,6 +223,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         setRecordedBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         setActiveStream(null);
+        cleanupAudioContext();
       };
 
       recorder.start(100);
@@ -113,6 +232,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
       setAudioUrl(null);
     } catch (err) {
       console.error(err);
+      cleanupAudioContext();
       toastError(t('recorder.mic_permission_error'));
     }
   };
@@ -122,6 +242,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
       mediaRecorderRef.current.stop();
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
       setIsRecording(false);
     }
@@ -145,7 +266,16 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
   return (
     <div className="flex flex-col items-center gap-4 p-5 bg-gray-900/80 rounded-3xl border border-gray-700/80 shadow-xl w-full">
-      {/* Initial Buttons */}
+      {/* 1. Pre-flight Waveform Preview (Kiểm tra micro trước) */}
+      {isPreviewing && previewStream && (
+        <AudioLevelMeter
+          stream={previewStream}
+          mode="preview"
+          onClosePreview={stopPreviewStream}
+        />
+      )}
+
+      {/* 2. Initial Buttons */}
       {!isRecording && !recordedBlob && (
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
           <button
@@ -162,12 +292,27 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
             <span>{t('recorder.start')}</span>
           </button>
 
-          <span className="text-gray-400 font-medium text-xs sm:text-sm">{t('common.or')}</span>
+          {/* Nút Kiểm tra Micro trước (Pre-flight Test) */}
+          <button
+            type="button"
+            onClick={togglePreview}
+            disabled={disabled}
+            className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-semibold transition-all cursor-pointer border text-xs sm:text-sm ${
+              isPreviewing
+                ? 'bg-cyan-950 text-cyan-400 border-cyan-700 shadow-cyan-500/20'
+                : 'bg-gray-800 hover:bg-gray-750 text-gray-300 border-gray-700 hover:border-gray-600'
+            }`}
+          >
+            <Activity className={`w-4 h-4 ${isPreviewing ? 'animate-spin text-cyan-400' : 'text-cyan-400'}`} />
+            <span>{isPreviewing ? 'Dừng kiểm tra' : 'Kiểm tra Micro'}</span>
+          </button>
 
-          <label className={`flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl font-bold text-white shadow-xl transition-all cursor-pointer ${
-            disabled ? 'bg-gray-700 cursor-not-allowed opacity-50' : 'bg-gray-800 hover:bg-gray-700 border border-gray-600 active:scale-95'
+          <span className="text-gray-500 font-medium text-xs hidden sm:inline">•</span>
+
+          <label className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-semibold text-white shadow-md transition-all cursor-pointer text-xs sm:text-sm ${
+            disabled ? 'bg-gray-700 cursor-not-allowed opacity-50' : 'bg-gray-800 hover:bg-gray-750 border border-gray-700 active:scale-95'
           }`}>
-            <Upload className="w-5 h-5 text-blue-400" />
+            <Upload className="w-4 h-4 text-blue-400" />
             <span>{t('recorder.upload_file')}</span>
             <input 
               type="file" 
@@ -181,7 +326,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         </div>
       )}
 
-      {/* Recording in Progress State */}
+      {/* 3. Recording in Progress State */}
       {isRecording && (
         <div className="flex flex-col items-center gap-4 w-full animate-in fade-in duration-200">
           {/* Header Recording Badge & Timer */}
@@ -191,6 +336,11 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
               <span>{t('recorder.recording')}</span>
             </div>
 
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-lime-400 bg-lime-950/60 border border-lime-800/60 px-2.5 py-1 rounded-full">
+              <Sparkles className="w-3 h-3 text-lime-400" />
+              <span>RNNoise AI: Bật</span>
+            </div>
+
             <div className="flex items-center gap-1.5 font-mono text-base font-extrabold text-white bg-gray-950 px-3.5 py-1 rounded-full border border-gray-800 shadow-inner">
               <Timer className="w-4 h-4 text-lime-400" />
               <span>{formatTimer(recordingSeconds)}</span>
@@ -198,7 +348,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
           </div>
 
           {/* Real-time Audio Level Meter */}
-          <AudioLevelMeter stream={activeStream} isRecording={isRecording} />
+          <AudioLevelMeter stream={activeStream} isRecording={isRecording} mode="recording" />
 
           {/* Stop Recording Button */}
           <button
@@ -212,10 +362,9 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         </div>
       )}
 
-      {/* Recorded & Ready to Review State */}
+      {/* 4. Recorded & Ready to Review State */}
       {recordedBlob && audioUrl && (
         <div className="flex flex-col items-center gap-4 w-full animate-in fade-in duration-200">
-          {/* Custom Dark Mode Audio Player */}
           <DarkAudioPlayer audioUrl={audioUrl} />
 
           {/* Bottom Action Buttons */}
@@ -224,7 +373,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
               type="button"
               onClick={resetRecording}
               disabled={disabled}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-gray-700"
+              className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-800 hover:bg-gray-750 text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-gray-700"
             >
               <RotateCcw className="w-4 h-4" />
               <span>{t('recorder.re_record')}</span>
