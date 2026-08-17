@@ -22,6 +22,8 @@ import {
   Calendar
 } from 'lucide-react';
 
+import StudentAnalyticsDashboard from '@/app/teacher/components/StudentAnalyticsDashboard';
+
 interface SubmissionTableProps {
   submissions: SubmissionData[];
   assignments: AssignmentData[];
@@ -38,6 +40,22 @@ function normalizeScore(val: any): number {
   while (n > 100) n = n / 100;
   if (n <= 1.0 && n > 0) n = n * 100;
   return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+// Safely extract timestamp from Firestore or audio filename fallback
+function getSubmissionTimestamp(sub: SubmissionData): number {
+  if (sub.createdAt?.toDate) {
+    return sub.createdAt.toDate().getTime();
+  }
+  if (sub.createdAt?.seconds) {
+    return sub.createdAt.seconds * 1000;
+  }
+  const path = sub.audioStoragePath || sub.audioUrl || '';
+  const match = path.match(/_(\d{13})\./);
+  if (match && match[1]) {
+    return Number(match[1]);
+  }
+  return 0;
 }
 
 export default function SubmissionTable({ submissions, assignments }: SubmissionTableProps) {
@@ -283,8 +301,14 @@ export default function SubmissionTable({ submissions, assignments }: Submission
   };
 
   return (
-    <div className="space-y-4 w-full max-w-full min-w-0" ref={popoverRef}>
-      {/* Top Toolbar */}
+    <div className="space-y-6 w-full max-w-full min-w-0" ref={popoverRef}>
+      {/* 1. Student Analytics Overview Dashboard */}
+      <StudentAnalyticsDashboard 
+        submissions={submissions} 
+        assignments={assignments} 
+      />
+
+      {/* 2. Top Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-900/80 p-4 rounded-2xl border border-gray-700/80">
         <div className="flex items-center gap-3">
           <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
@@ -689,7 +713,7 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                 const isAudioLoading = loadingAudioId === subId;
                 const hasAudio = Boolean(sub.audioUrl || sub.audioStoragePath || (sub as any).audioPath);
 
-                // Format timestamp
+                // Format timestamp with fallback to audio filename timestamp
                 let formattedTime = '-';
                 if (sub.createdAt?.toDate) {
                   const d = sub.createdAt.toDate();
@@ -697,6 +721,13 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                 } else if (sub.createdAt?.seconds) {
                   const d = new Date(sub.createdAt.seconds * 1000);
                   formattedTime = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+                } else {
+                  const path = sub.audioStoragePath || sub.audioUrl || '';
+                  const match = path.match(/_(\d{13})\./);
+                  if (match && match[1]) {
+                    const d = new Date(Number(match[1]));
+                    formattedTime = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+                  }
                 }
 
                 return (
@@ -705,81 +736,81 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                     className="hover:bg-gray-800/40 transition-colors border-b border-gray-800/60"
                   >
                     {/* 1. Student Email */}
-                    <td className="px-5 py-4 font-mono font-medium text-gray-200 truncate max-w-[220px]" title={sub.studentEmail}>
+                    <td className="px-3.5 py-3 font-mono font-medium text-gray-200 truncate max-w-[200px]" title={sub.studentEmail}>
                       {sub.studentEmail}
                     </td>
 
                     {/* 2. Assignment / Word */}
-                    <td className="px-5 py-4 max-w-[240px]">
+                    <td className="px-3.5 py-3 max-w-[220px]">
                       {assignment?.title ? (
                         <div>
-                          <p className="font-bold text-white truncate" title={assignment.title}>
+                          <p className="font-bold text-white truncate text-xs sm:text-sm font-sans" title={assignment.title}>
                             {assignment.title}
                           </p>
-                          <p className="font-mono text-gray-400 text-xs truncate" title={sub.word}>
+                          <p className="font-sans text-gray-400 text-xs truncate" title={sub.word}>
                             {sub.word}
                           </p>
                         </div>
                       ) : (
-                        <p className="font-mono text-white font-medium truncate" title={sub.word}>
+                        <p className="font-sans text-white font-medium truncate text-xs sm:text-sm" title={sub.word}>
                           {sub.word}
                         </p>
                       )}
                     </td>
 
                     {/* 3. Submitted At (Date & Time) */}
-                    <td className="px-4 py-4 text-center font-mono text-xs text-gray-400 whitespace-nowrap">
+                    <td className="px-3 py-3 text-center font-mono text-[11px] text-gray-400 whitespace-nowrap">
                       {formattedTime}
                     </td>
 
                     {/* 4. Attempt */}
-                    <td className="px-4 py-4 text-center font-mono text-gray-400">
+                    <td className="px-3 py-3 text-center font-mono text-xs text-gray-400">
                       {sub.attemptNumber ? `${sub.attemptNumber} / ${assignment?.maxAttempts || 3}` : '1'}
                     </td>
 
                     {/* 5. Phoneme Score */}
-                    <td className="px-4 py-4 text-center font-mono font-bold text-blue-400 whitespace-nowrap text-sm">
+                    <td className="px-3 py-3 text-center font-mono font-bold text-blue-400 whitespace-nowrap text-xs sm:text-sm">
                       {phonemeScore}
                     </td>
 
                     {/* 6. DTW Score */}
-                    <td className="px-4 py-4 text-center font-mono text-purple-400 whitespace-nowrap text-sm">
+                    <td className="px-3 py-3 text-center font-mono text-purple-400 whitespace-nowrap text-xs sm:text-sm">
                       {dtwScore}
                     </td>
 
                     {/* 7. Whisper Score */}
-                    <td className="px-4 py-4 text-center font-mono text-pink-400 whitespace-nowrap text-sm">
+                    <td className="px-3 py-3 text-center font-mono text-pink-400 whitespace-nowrap text-xs sm:text-sm">
                       {whisperScore}
                     </td>
 
                     {/* 8. Total Score */}
-                    <td className="px-4 py-4 text-center font-mono font-black text-lime-400 whitespace-nowrap text-base">
+                    <td className="px-3 py-3 text-center font-mono font-black text-lime-400 whitespace-nowrap text-sm sm:text-base">
                       {totalScore}
                     </td>
 
                     {/* 9. Result Status */}
-                    <td className="px-5 py-4 text-center whitespace-nowrap">
+                    <td className="px-3.5 py-3 text-center whitespace-nowrap">
                       {sub.isPassed ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/15 text-green-400 border border-green-500/30 whitespace-nowrap">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 whitespace-nowrap">
+                          <CheckCircle2 className="w-3 h-3 shrink-0" />
                           <span>{t('practice.status_passed')}</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/15 text-red-400 border border-red-500/30 whitespace-nowrap">
-                          <XCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-500/15 text-red-400 border border-red-500/30 whitespace-nowrap">
+                          <XCircle className="w-3 h-3 shrink-0" />
                           <span>{t('practice.status_failed')}</span>
                         </span>
                       )}
                     </td>
 
                     {/* 10. Audio Player Button */}
-                    <td className="px-4 py-4 text-center">
+                    <td className="px-3 py-3 text-center">
                       {hasAudio ? (
                         <button
                           type="button"
                           onClick={() => handlePlayAudio(sub)}
                           disabled={isAudioLoading}
-                          className={`p-2.5 rounded-xl border transition-all cursor-pointer inline-flex items-center justify-center ${
+                          className={`p-2 rounded-xl border transition-all cursor-pointer inline-flex items-center justify-center ${
                             isAudioPlaying
                               ? 'bg-lime-400 text-gray-950 border-lime-400 shadow-md shadow-lime-400/30 scale-105 animate-pulse'
                               : isAudioLoading
@@ -789,11 +820,11 @@ export default function SubmissionTable({ submissions, assignments }: Submission
                           title={isAudioPlaying ? 'Pause' : t('sub.th_listen')}
                         >
                           {isAudioLoading ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : isAudioPlaying ? (
-                            <Pause className="w-4 h-4 fill-current" />
+                            <Pause className="w-3.5 h-3.5 fill-current" />
                           ) : (
-                            <Play className="w-4 h-4 fill-current ml-0.5" />
+                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                           )}
                         </button>
                       ) : (

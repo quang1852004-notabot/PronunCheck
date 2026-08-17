@@ -20,7 +20,8 @@ import AssignmentForm from '@/app/teacher/components/AssignmentForm';
 import EditAssignmentModal from '@/app/teacher/components/EditAssignmentModal';
 import ScoringConfigComponent from '@/app/teacher/components/ScoringConfig';
 import SubmissionTable from '@/app/teacher/components/SubmissionTable';
-import { Edit2, Trash2, ArrowLeft, Copy, Check, Power, AlertTriangle, BookOpen, Sliders, Table2 } from 'lucide-react';
+import ClassManagement from '@/app/teacher/components/ClassManagement';
+import { Edit2, Trash2, ArrowLeft, Copy, Check, Power, AlertTriangle, BookOpen, Sliders, Table2, Settings } from 'lucide-react';
 
 export default function ClassDetail({ params }: { params: Promise<{ classId: string }> }) {
   const { classId } = use(params);
@@ -32,7 +33,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
   const [assignments, setAssignments] = useState<AssignmentData[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'assignments' | 'config' | 'submissions'>('assignments');
+  const [activeTab, setActiveTab] = useState<'assignments' | 'config' | 'submissions' | 'management'>('assignments');
   const [copied, setCopied] = useState(false);
 
   // Edit & Delete states
@@ -104,7 +105,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
       <main className="min-h-screen bg-gray-900 text-white flex flex-col w-full max-w-full overflow-x-hidden">
         <Navbar currentRole="teacher" />
 
-        <div className="flex-1 p-4 sm:p-6 md:p-8 max-w-6xl mx-auto w-full space-y-6">
+        <div className="flex-1 p-3 sm:p-6 md:p-8 max-w-[1600px] mx-auto w-full space-y-6">
           {/* Header Card */}
           <div className="bg-gray-800/90 p-5 sm:p-6 rounded-3xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-gray-700/80">
             <div className="flex items-center space-x-3 sm:space-x-4">
@@ -116,9 +117,20 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <div className="min-w-0">
-                <h1 className="text-xl sm:text-2xl font-black text-white truncate">
-                  {classData ? (classData.className || classData.name) : t('common.loading')}
-                </h1>
+                <div className="flex items-center gap-2.5">
+                  <h1 className="text-xl sm:text-2xl font-black text-white truncate font-sans">
+                    {classData ? (classData.className || classData.name) : t('common.loading')}
+                  </h1>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('management')}
+                    className="p-1.5 rounded-xl bg-gray-700/60 hover:bg-gray-700 text-gray-400 hover:text-blue-400 transition-colors cursor-pointer shrink-0"
+                    title={t('mgmt.rename_class')}
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                   <span className="text-gray-400 text-xs">{t('student.class_id')}:</span>
                   <code className="bg-gray-900 px-2.5 py-0.5 rounded-lg text-blue-400 font-mono text-xs font-bold border border-gray-700">
@@ -137,7 +149,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="px-3 py-1 bg-gray-900 text-gray-300 text-xs rounded-xl border border-gray-700">
+              <span className="px-3 py-1.5 bg-gray-900 text-gray-300 text-xs rounded-xl border border-gray-700 font-medium">
                 {assignments.length} {t('tab.assignments').toLowerCase()} • {submissions.length} {t('sub.submissions_count')}
               </span>
             </div>
@@ -180,6 +192,18 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
               >
                 <Table2 className="w-4 h-4" />
                 {t('tab.submissions')} ({submissions.length})
+              </button>
+
+              <button
+                onClick={() => setActiveTab('management')}
+                className={`py-3 px-4 sm:px-6 font-bold text-xs sm:text-sm rounded-t-2xl transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'management'
+                    ? 'border-b-2 border-emerald-500 text-emerald-400 bg-gray-800/80 shadow-sm'
+                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/40'
+                }`}
+              >
+                <Settings className="w-4 h-4" />
+                {t('tab.class_management')}
               </button>
             </nav>
           </div>
@@ -311,6 +335,19 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
           {/* Tab 3: Submissions Table */}
           <div className={activeTab === 'submissions' ? 'animate-in fade-in duration-200' : 'hidden'}>
             <SubmissionTable submissions={submissions} assignments={assignments} />
+          </div>
+
+          {/* Tab 4: Class Management */}
+          <div className={activeTab === 'management' ? 'animate-in fade-in duration-200' : 'hidden'}>
+            {classData && (
+              <ClassManagement
+                classId={classId}
+                classData={classData}
+                assignments={assignments}
+                submissions={submissions}
+                onClassUpdated={loadData}
+              />
+            )}
           </div>
         </div>
 
