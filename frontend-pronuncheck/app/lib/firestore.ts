@@ -121,11 +121,34 @@ export async function getAssignments(classId: string): Promise<AssignmentData[]>
   } as AssignmentData));
 }
 
+/**
+ * Loại bỏ triệt để mọi giá trị undefined khỏi object trước khi ghi vào Firestore.
+ * Firestore sẽ báo lỗi (Unsupported field value: undefined) nếu bất kỳ trường nào mang giá trị undefined.
+ */
+export function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) return null as any;
+  if (Array.isArray(data)) {
+    return data
+      .map(item => cleanForFirestore(item))
+      .filter(item => item !== undefined) as any;
+  }
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = cleanForFirestore(value);
+      }
+    }
+    return cleaned;
+  }
+  return data;
+}
+
 export async function createAssignment(classId: string, assignment: Omit<AssignmentData, 'id' | 'classId'>): Promise<string> {
-  const ref = await addDoc(collection(db, `classes/${classId}/assignments`), {
+  const ref = await addDoc(collection(db, `classes/${classId}/assignments`), cleanForFirestore({
     ...assignment,
     createdAt: serverTimestamp()
-  });
+  }));
   return ref.id;
 }
 
@@ -135,7 +158,7 @@ export async function updateAssignment(
   data: Partial<Omit<AssignmentData, 'id' | 'classId'>>
 ): Promise<void> {
   const docRef = doc(db, `classes/${classId}/assignments`, assignmentId);
-  await updateDoc(docRef, data);
+  await updateDoc(docRef, cleanForFirestore(data));
 }
 
 export async function deleteAssignment(classId: string, assignmentId: string): Promise<void> {
@@ -145,9 +168,9 @@ export async function deleteAssignment(classId: string, assignmentId: string): P
 
 export async function updateScoringConfig(classId: string, config: ScoringConfig): Promise<void> {
   const docRef = doc(db, 'classes', classId);
-  await updateDoc(docRef, {
+  await updateDoc(docRef, cleanForFirestore({
     scoringConfig: config
-  });
+  }));
 }
 
 export async function getSubmissions(classId: string): Promise<SubmissionData[]> {
@@ -175,12 +198,14 @@ export async function getSubmissionsByStudent(classId: string, studentId: string
 }
 
 export async function createSubmission(classId: string, submission: Omit<SubmissionData, 'id' | 'classId'>): Promise<string> {
-  const ref = await addDoc(collection(db, `classes/${classId}/submissions`), {
+  const sanitizedSubmission = cleanForFirestore({
     ...submission,
     createdAt: serverTimestamp()
   });
+  const ref = await addDoc(collection(db, `classes/${classId}/submissions`), sanitizedSubmission);
   return ref.id;
 }
+
 export async function getClassesByTeacher(teacherId: string): Promise<ClassData[]> {
   const q = query(collection(db, 'classes'), where('teacherId', '==', teacherId));
   const snap = await getDocs(q);
@@ -191,17 +216,15 @@ export async function getClassesByTeacher(teacherId: string): Promise<ClassData[
 }
 
 export async function createClass(classData: Omit<ClassData, 'id'>, customId?: string): Promise<string> {
+  const sanitizedData = cleanForFirestore({
+    ...classData,
+    createdAt: serverTimestamp()
+  });
   if (customId) {
-    await setDoc(doc(db, 'classes', customId), {
-      ...classData,
-      createdAt: serverTimestamp()
-    });
+    await setDoc(doc(db, 'classes', customId), sanitizedData);
     return customId;
   } else {
-    const ref = await addDoc(collection(db, 'classes'), {
-      ...classData,
-      createdAt: serverTimestamp()
-    });
+    const ref = await addDoc(collection(db, 'classes'), sanitizedData);
     return ref.id;
   }
 }

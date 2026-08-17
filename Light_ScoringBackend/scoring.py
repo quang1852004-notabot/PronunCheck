@@ -470,10 +470,12 @@ def calculate_dynamic_score(
     # 1. Kiểm tra im lặng tuyệt đối (Silent audio check)
     if y_acc < 15.0 and c_whisper < 15.0:
         return {
+            "phoneme_score": 0.0,
             "precise_score": 0.0,
             "whisper_score": 0.0,
             "dtw_score": 0.0,
             "fluent_score": 0.0,
+            "total_score": 0.0,
             "hybrid_target_score": 0.0,
             "is_passed": False,
             "feedback": "Không phát hiện thấy tiếng nói rõ ràng. Vui lòng kiểm tra lại micro và thu âm lại.",
@@ -517,10 +519,12 @@ def calculate_dynamic_score(
     )
     
     return {
+        "phoneme_score": round(y_acc, 2),
         "precise_score": round(y_acc, 2),
         "whisper_score": round(c_whisper, 2),
         "dtw_score": round(z_pitch, 2),
         "fluent_score": round(z_flu, 2),
+        "total_score": round(final_score_clamped, 2),
         "hybrid_target_score": round(final_score_clamped, 2),
         "is_passed": is_passed,
         "feedback": feedback,

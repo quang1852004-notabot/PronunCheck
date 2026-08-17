@@ -91,17 +91,22 @@ export default function FreeModePage() {
       const charScores: CharScoreItem[] = data.char_scores || [];
       const worstChar: WorstCharItem | undefined = assessment.worst_char_detail || (charScores.length > 0 ? charScores.reduce((min, c) => c.score < min.score ? c : min, charScores[0]) : undefined);
 
+      const phonemeScore = assessment.phoneme_score ?? assessment.precise_score ?? 0;
+      const dtwScore = assessment.dtw_score ?? 0;
+      const whisperScore = assessment.whisper_score ?? 0;
+      const totalScore = assessment.total_score ?? assessment.hybrid_target_score ?? 0;
+
       setResult({
-        passed: assessment.is_passed,
-        feedback: assessment.feedback,
+        passed: Boolean(assessment.is_passed),
+        feedback: assessment.feedback || '',
         charScores,
         worstChar,
         audioUrl: localAudioUrl,
         scores: {
-          phoneme_score: assessment.phoneme_score,
-          dtw_score: assessment.dtw_score,
-          whisper_score: assessment.whisper_score,
-          total_score: assessment.total_score,
+          phoneme_score: phonemeScore,
+          dtw_score: dtwScore,
+          whisper_score: whisperScore,
+          total_score: totalScore,
         }
       });
 
