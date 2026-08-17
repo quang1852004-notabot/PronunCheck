@@ -24,13 +24,42 @@ SHORT_VOWEL_FOLLOWERS = [
     r'bb', r'dd', r'ff', r'gg', r'll', r'mm', r'nn', r'pp', r'rr', r'tt' # Phụ âm đôi làm ngắn nguyên âm
 ]
 
+# Bảng ánh xạ số sang chữ tiếng Đức (German Number Normalization)
+GERMAN_NUMBERS_MAP = {
+    "0": "null", "1": "eins", "2": "zwei", "3": "drei", "4": "vier",
+    "5": "fünf", "6": "sechs", "7": "sieben", "8": "acht", "9": "neun",
+    "10": "zehn", "11": "elf", "12": "zwölf", "13": "dreizehn", "14": "vierzehn",
+    "15": "fünfzehn", "16": "sechzehn", "17": "siebzehn", "18": "achtzehn", "19": "neunzehn",
+    "20": "zwanzig", "30": "dreißig", "40": "vierzig", "50": "fünfzig", "60": "sechzig",
+    "70": "siebzig", "80": "achtzig", "90": "neunzig", "100": "hundert"
+}
+
+def normalize_german_transcript(text: str) -> str:
+    """
+    Chuẩn hóa văn bản tiếng Đức:
+      - Đổi chữ số (1, 2, 3...) thành chữ viết (eins, zwei, drei...).
+      - Loại bỏ dấu câu và khoảng trắng thừa.
+      - Chuyển thành chữ thường.
+    """
+    if not text:
+        return ""
+    t = text.lower().strip()
+    
+    # Thay thế số đơn lẻ thành chữ
+    for digit, word in GERMAN_NUMBERS_MAP.items():
+        t = re.sub(r'\b' + digit + r'\b', word, t)
+        
+    # Loại bỏ dấu câu (chỉ giữ lại chữ cái, số và khoảng trắng)
+    t = re.sub(r'[^a-zäöüß\s0-9]', ' ', t)
+    # Gom khoảng trắng
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
 def count_german_syllables(word: str) -> int:
     """
     Ước tính số âm tiết trong từ hoặc câu tiếng Đức dựa trên số cụm nguyên âm.
     """
-    text = word.lower().strip()
-    # Loại bỏ ký tự không phải chữ cái và khoảng trắng
-    text = re.sub(r'[^a-zäöüß\s]', '', text)
+    text = normalize_german_transcript(word)
     if not text:
         return 1
         

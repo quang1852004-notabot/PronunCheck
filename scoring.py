@@ -194,17 +194,18 @@ def calculate_dtw_score(user_audio: np.ndarray, expected_text: str) -> float:
 
 
 # ==============================================================================
-# 3. NHẬN DIỆN TỪ & ĐỘ TRỌN VẸN (WHISPER-TINY & SOFT MATCHING FACTOR)
+# 3. NHẬN DIỆN TỪ & ĐỘ TRỌN VẸN (WHISPER-TINY & ROBUST NORMALIZATION)
 # ==============================================================================
 def analyze_with_whisper(audio_array: np.ndarray, expected_text: str, whisper_model) -> Tuple[float, str]:
     """
     Sử dụng Faster-Whisper (Tiny) để kiểm tra:
       - Học viên có thực sự nói các từ mục tiêu không?
-      - Tính toán hệ số hoàn thành mượt mà x_soft in [0.0, 1.0].
-    Trả về (x_soft_100, transcribed_text)
+      - Chuẩn hóa chữ số tiếng Đức (1, 2, 3... -> eins, zwei, drei...).
+      - Tính toán điểm hoàn thành nội dung c_whisper in [0, 100].
+    Trả về (c_whisper_100, transcribed_text)
     """
     if whisper_model is None:
-        return 80.0, expected_text
+        return 85.0, expected_text
         
     try:
         segments_gen, info = whisper_model.transcribe(
@@ -215,41 +216,53 @@ def analyze_with_whisper(audio_array: np.ndarray, expected_text: str, whisper_mo
             condition_on_previous_text=False
         )
         
-        transcribed_text = " ".join([seg.text.strip() for seg in segments_gen]).strip().lower()
-        if not transcribed_text:
-            return 0.0, ""  # Không nhận diện được tiếng người
+        raw_transcription = " ".join([seg.text.strip() for seg in segments_gen]).strip()
+        transcribed_norm = german_phonetics.normalize_german_transcript(raw_transcription)
+        expected_norm = german_phonetics.normalize_german_transcript(expected_text)
+        
+        # Nếu Whisper không nghe thấy gì
+        if not transcribed_norm:
+            # Đo năng lượng âm thanh RMS
+            rms = float(np.sqrt(np.mean(audio_array ** 2))) if len(audio_array) > 0 else 0.0
+            if rms < 0.003:
+                return 0.0, ""  # Thực sự là audio im lặng
+            return 50.0, raw_transcription  # Có tiếng nói nhưng ASR không nhận diện được trọn vẹn
             
-        expected_clean = expected_text.lower().strip()
-        expected_words = [w for w in expected_clean.split() if w]
+        expected_words = [w for w in expected_norm.split() if w]
+        transcribed_words = [w for w in transcribed_norm.split() if w]
         
         if not expected_words:
-            return 100.0, transcribed_text
+            return 100.0, raw_transcription
 
-        # 1. Kiểm tra từ mục tiêu có xuất hiện trọn vẹn trong văn bản không
-        if expected_clean in transcribed_text:
-            return 100.0, transcribed_text
+        # 1. Trùng khớp hoàn toàn chuỗi đã chuẩn hóa
+        if expected_norm in transcribed_norm or transcribed_norm in expected_norm:
+            return 100.0, raw_transcription
             
-        # 2. Tính tỷ lệ số từ xuất hiện (Word Recall)
-        matched_words = 0
+        # 2. Tính tỷ lệ số từ xuất hiện (Word Recall với hỗ trợ so khớp gần đúng)
+        matched_words = 0.0
         for w in expected_words:
-            if w in transcribed_text:
-                matched_words += 1
+            if w in transcribed_words:
+                matched_words += 1.0
+            elif w in transcribed_norm:
+                matched_words += 0.9
+            else:
+                # Fuzzy match cho từng từ
+                best_sub_match = max([difflib.SequenceMatcher(None, w, tw).ratio() for tw in transcribed_words], default=0.0)
+                if best_sub_match >= 0.75:
+                    matched_words += best_sub_match
                 
         word_recall = matched_words / len(expected_words)
         
-        # 3. Tính độ tương đồng ký tự (Levenshtein Sequence Matcher)
-        seq_matcher = difflib.SequenceMatcher(None, expected_clean, transcribed_text)
-        char_similarity = seq_matcher.ratio()
+        # 3. Tính độ tương đồng chuỗi ký tự Levenshtein
+        seq_ratio = difflib.SequenceMatcher(None, expected_norm, transcribed_norm).ratio()
         
-        # x_soft là kết hợp linh hoạt giữa Word Recall và Character Similarity
-        x_soft = max(word_recall, char_similarity)
-        
-        # Chuyển về thang điểm 100
-        x_soft_100 = float(np.clip(x_soft * 100.0, 0.0, 100.0))
-        return round(x_soft_100, 2), transcribed_text
+        # Điểm hoàn thành là giá trị tốt nhất giữa Word Recall và Sequence Ratio
+        score = max(word_recall, seq_ratio)
+        score_100 = float(np.clip(score * 100.0, 0.0, 100.0))
+        return round(score_100, 2), raw_transcription
     except Exception as e:
         print(f"Whisper Exception: {e}", flush=True)
-        return 70.0, expected_text
+        return 75.0, expected_text
 
 # Giữ tên hàm analyze_with_whisperx để tương thích hoàn toàn
 def analyze_with_whisperx(audio_array: np.ndarray, expected_word: str, whisper_model) -> float:
@@ -400,7 +413,7 @@ def analyze_precise_score(
 
 
 # ==============================================================================
-# 5. THUẬT TOÁN CHẤM ĐIỂM ĐỘNG MỚI (DYNAMIC SCORING SPECIFICATION)
+# 5. THUẬT TOÁN CHẤM ĐIỂM ĐỘNG MỚI (DYNAMIC SIGMOID LINEAR COMBINATION)
 # ==============================================================================
 def calculate_dynamic_score(
     precise_score: float,        # GOP Accuracy [0.0 - 1.0] hoặc [0 - 100]
@@ -411,56 +424,75 @@ def calculate_dynamic_score(
     char_scores: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
-    Thuật toán chấm điểm phát âm toàn diện:
-    Final Score = x_soft * (w_acc(L) * y + w_flu(L) * z)
+    Thuật toán chấm điểm phát âm toàn diện (Non-Destructive Dynamic Scoring):
+    Final Score = w_acc(L) * y_acc + w_flu(L) * z_flu
     
     Trong đó:
-      - x_soft: Hệ số hoàn thành từ Whisper [0.0 - 1.0].
-      - y: Điểm độ chuẩn xác âm vị GOP (Accuracy) [0 - 100].
-      - z: Điểm lưu loát & ngữ điệu (Fluency & Prosody từ F0 DTW) [0 - 100].
+      - y_acc: Điểm độ chuẩn xác âm vị GOP (Wav2Vec2 + German Phonetics) [0 - 100].
+      - z_pitch: Điểm so khớp cao độ ngữ điệu F0 DTW [0 - 100].
+      - c_whisper: Điểm nhận diện trọn vẹn từ ngữ Whisper (đã chuẩn hóa số/chữ) [0 - 100].
+      - z_flu = (0.60 * z_pitch) + (0.40 * c_whisper): Điểm ngữ điệu & lưu loát.
       - w_acc(L) = 1 / (1 + exp(k * (L - L0))): Trọng số Sigmoid theo độ dài hiệu dụng.
       - w_flu(L) = 1 - w_acc(L).
     """
     # Chuẩn hóa các thang điểm về [0, 100]
     y_acc = float(precise_score * 100.0 if precise_score <= 1.0 else precise_score)
-    z_flu = float(dtw_score * 100.0 if dtw_score <= 1.0 else dtw_score)
-    x_soft = float(whisper_score if whisper_score <= 1.0 else whisper_score / 100.0)
-    x_soft = float(np.clip(x_soft, 0.0, 1.0))
+    z_pitch = float(dtw_score * 100.0 if dtw_score <= 1.0 else dtw_score)
+    c_whisper = float(whisper_score * 100.0 if whisper_score <= 1.0 else whisper_score)
     
-    # 1. Tính độ dài hiệu dụng L (kết hợp số từ và số âm tiết)
+    # 1. Kiểm tra im lặng tuyệt đối (Silent audio check)
+    if y_acc < 15.0 and c_whisper < 15.0:
+        return {
+            "precise_score": 0.0,
+            "whisper_score": 0.0,
+            "dtw_score": 0.0,
+            "fluent_score": 0.0,
+            "hybrid_target_score": 0.0,
+            "is_passed": False,
+            "feedback": "Không phát hiện thấy tiếng nói rõ ràng. Vui lòng kiểm tra lại micro và thu âm lại.",
+            "weights": {
+                "w_acc": 0.5,
+                "w_flu": 0.5,
+                "effective_length": 1.0,
+                "num_words": 1,
+                "num_syllables": 1
+            }
+        }
+        
+    # 2. Tính độ dài hiệu dụng L (kết hợp số từ và số âm tiết)
     eff_l, num_words, num_syllables = german_phonetics.calculate_effective_length(expected_text)
     
-    # 2. Tính trọng số động Sigmoid
-    # w_acc: Từ ngắn (L nhỏ) -> w_acc cao (~0.8 - 0.9); Câu dài -> w_acc thấp (~0.2 - 0.4)
+    # 3. Tính trọng số động Sigmoid
+    # w_acc: Từ ngắn (L nhỏ) -> w_acc cao (~0.82); Câu dài -> w_acc thấp (~0.27)
     exponent = config.SCORING_K * (eff_l - config.SCORING_L0)
-    # Tránh overflow cho exp
     exponent_clamped = max(-20.0, min(20.0, exponent))
     w_acc = float(1.0 / (1.0 + np.exp(exponent_clamped)))
     w_flu = float(1.0 - w_acc)
     
-    # 3. Tính điểm lõi kết hợp tuyến tính (không bị lỗi triệt tiêu của phép nhân)
-    linear_core_score = (w_acc * y_acc) + (w_flu * z_flu)
+    # 4. Điểm lưu loát & tự nhiên (Prosody & Fluency Score z):
+    # Kết hợp giữa Đường cong Cao độ F0 (60%) và Nhận diện ngữ cảnh Whisper (40%)
+    z_flu = (0.60 * z_pitch) + (0.40 * c_whisper)
     
-    # 4. Áp dụng hệ số trọn vẹn x_soft
-    final_score = x_soft * linear_core_score
+    # 5. Điểm tổng hợp tuyến tính KHÔNG TRIỆT TIÊU (Linear Combination)
+    final_score = (w_acc * y_acc) + (w_flu * z_flu)
     final_score_clamped = float(np.clip(final_score, 0.0, 100.0))
     
     is_passed = bool(final_score_clamped >= config.PASSING_THRESHOLD)
     
-    # 5. Sinh nhận xét sư phạm tiếng Đức chi tiết
+    # 6. Sinh nhận xét sư phạm tiếng Đức chi tiết
     all_chars = char_scores if char_scores is not None else ([worst_char_info] if worst_char_info else [])
     feedback = german_phonetics.generate_german_feedback(
         expected_word=expected_text,
         char_scores=all_chars,
-        whisper_score=x_soft,
-        dtw_pitch_score=z_flu / 100.0,
+        whisper_score=c_whisper / 100.0,
+        dtw_pitch_score=z_pitch / 100.0,
         is_passed=is_passed
     )
     
     return {
         "precise_score": round(y_acc, 2),
-        "whisper_score": round(x_soft * 100.0, 2),
-        "dtw_score": round(z_flu, 2),
+        "whisper_score": round(c_whisper, 2),
+        "dtw_score": round(z_pitch, 2),
         "fluent_score": round(z_flu, 2),
         "hybrid_target_score": round(final_score_clamped, 2),
         "is_passed": is_passed,
