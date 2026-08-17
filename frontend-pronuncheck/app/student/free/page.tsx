@@ -182,31 +182,39 @@ export default function FreeModePage() {
 
                     <p className="text-base font-medium text-gray-200">{result.feedback}</p>
 
-                    {/* Score Breakdown */}
+                    {/* Score Breakdown (Clean Integers 0 - 100) */}
                     {result.scores && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-gray-700/60 text-xs">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-gray-700/60 text-xs">
                         {result.scores.phoneme_score !== undefined && (
-                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                            <span className="text-gray-400 block">{t('practice.score_precise')}</span>
-                            <strong className="text-lime-400 text-sm font-bold">{(result.scores.phoneme_score * 100).toFixed(1)}%</strong>
+                          <div className="bg-gray-900/80 p-3 rounded-2xl border border-gray-800">
+                            <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_phonetics')}</span>
+                            <strong className="text-lime-400 font-mono text-xl font-black">
+                              {Math.round(result.scores.phoneme_score <= 1.0 ? result.scores.phoneme_score * 100 : result.scores.phoneme_score)}
+                            </strong>
                           </div>
                         )}
                         {result.scores.dtw_score !== undefined && (
-                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                            <span className="text-gray-400 block">{t('practice.score_intonation')}</span>
-                            <strong className="text-blue-400 text-sm font-bold">{(result.scores.dtw_score * 100).toFixed(1)}%</strong>
+                          <div className="bg-gray-900/80 p-3 rounded-2xl border border-gray-800">
+                            <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_intonation')}</span>
+                            <strong className="text-blue-400 font-mono text-xl font-black">
+                              {Math.round(result.scores.dtw_score <= 1.0 ? result.scores.dtw_score * 100 : result.scores.dtw_score)}
+                            </strong>
                           </div>
                         )}
                         {result.scores.whisper_score !== undefined && (
-                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                            <span className="text-gray-400 block">{t('practice.score_whisper')}</span>
-                            <strong className="text-purple-400 text-sm font-bold">{(result.scores.whisper_score * 100).toFixed(1)}%</strong>
+                          <div className="bg-gray-900/80 p-3 rounded-2xl border border-gray-800">
+                            <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_completeness')}</span>
+                            <strong className="text-purple-400 font-mono text-xl font-black">
+                              {Math.round(result.scores.whisper_score <= 1.0 ? result.scores.whisper_score * 100 : result.scores.whisper_score)}
+                            </strong>
                           </div>
                         )}
                         {result.scores.total_score !== undefined && (
-                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                            <span className="text-gray-400 block">{t('practice.score_total')}</span>
-                            <strong className="text-yellow-400 text-sm font-bold">{(result.scores.total_score * 100).toFixed(1)}%</strong>
+                          <div className="bg-gray-900/80 p-3 rounded-2xl border border-gray-800">
+                            <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_overall')}</span>
+                            <strong className="text-yellow-400 font-mono text-xl font-black">
+                              {Math.round(result.scores.total_score <= 1.0 ? result.scores.total_score * 100 : result.scores.total_score)}
+                            </strong>
                           </div>
                         )}
                       </div>
@@ -229,21 +237,13 @@ export default function FreeModePage() {
                     />
                   )}
 
-                  {/* Karaoke Visualizer */}
+                  {/* Word-Level Karaoke Visualizer */}
                   <PhonemeKaraokeVisualizer
                     expectedWord={word}
                     charScores={result.charScores}
                     currentTime={karaokeCurrentTime}
                     duration={karaokeDuration}
                     isPlaying={isKaraokePlaying}
-                  />
-
-                  {/* Phoneme Diagnostic Card */}
-                  <PhonemeDiagnosticCard
-                    worstChar={result.worstChar}
-                    expectedWord={word}
-                    feedback={result.feedback}
-                    isPassed={result.passed}
                   />
 
                   <div className="text-center pt-2">

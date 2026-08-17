@@ -7,20 +7,28 @@ import {
   CheckCircle2, 
   XCircle, 
   ChevronDown, 
-  Volume2, 
-  Sparkles,
-  Info,
-  Layers
+  Volume2
 } from 'lucide-react';
 import { SubmissionData } from '@/app/lib/firestore';
 import { getAudioUrl } from '@/app/lib/storage';
+import { useLanguage } from '@/app/contexts/LanguageContext';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
 import PhonemeKaraokeVisualizer from '@/app/components/PhonemeKaraokeVisualizer';
-import PhonemeDiagnosticCard, { CharScoreItem, WorstCharItem } from '@/app/components/PhonemeDiagnosticCard';
+import { CharScoreItem } from '@/app/components/PhonemeDiagnosticCard';
 
 interface StudentProgressChartProps {
   submissions: SubmissionData[];
   expectedWord: string;
+}
+
+// Safely normalize any score value to integer [0, 100] (Fixes 9477% and 10000% bug)
+function normalizeScore(val: any): number {
+  if (val === undefined || val === null) return 0;
+  let n = Number(val);
+  if (isNaN(n) || !isFinite(n)) return 0;
+  while (n > 100) n = n / 100;
+  if (n <= 1.0 && n > 0) n = n * 100;
+  return Math.min(100, Math.max(0, Math.round(n)));
 }
 
 // Single Expandable Attempt Accordion Item
@@ -33,6 +41,7 @@ function AttemptAccordionItem({
   attemptNumber: number;
   expectedWord: string;
 }) {
+  const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [resolvedAudioUrl, setResolvedAudioUrl] = useState<string | null>(submission.audioUrl || null);
   const [audioLoading, setAudioLoading] = useState(false);
@@ -62,26 +71,26 @@ function AttemptAccordionItem({
     }
   }, [isOpen, resolvedAudioUrl, submission]);
 
-  let totalScore = 0;
-  if (submission.detailedScore?.hybrid_target_score !== undefined) {
-    totalScore = submission.detailedScore.hybrid_target_score > 1 
-      ? submission.detailedScore.hybrid_target_score 
-      : submission.detailedScore.hybrid_target_score * 100;
-  } else if (submission.scores?.total_score !== undefined) {
-    totalScore = submission.scores.total_score * 100;
-  }
+  // Normalize scores to clean integers [0 - 100]
+  const rawTotal = submission.detailedScore?.hybrid_target_score !== undefined
+    ? submission.detailedScore.hybrid_target_score
+    : (submission.scores?.total_score !== undefined ? submission.scores.total_score : 0);
+  const totalScore = normalizeScore(rawTotal);
 
-  const phonemeScore = submission.scores?.phoneme_score !== undefined 
-    ? (submission.scores.phoneme_score > 1 ? submission.scores.phoneme_score : submission.scores.phoneme_score * 100) 
-    : (submission.detailedScore?.wav2vec_raw_score ? submission.detailedScore.wav2vec_raw_score * 100 : 0);
+  const rawPhoneme = submission.scores?.phoneme_score !== undefined 
+    ? submission.scores.phoneme_score 
+    : (submission.detailedScore?.wav2vec_raw_score !== undefined ? submission.detailedScore.wav2vec_raw_score : 0);
+  const phonemeScore = normalizeScore(rawPhoneme);
 
-  const dtwScore = submission.scores?.dtw_score !== undefined 
-    ? (submission.scores.dtw_score > 1 ? submission.scores.dtw_score : submission.scores.dtw_score * 100) 
-    : (submission.detailedScore?.dtw_score ? submission.detailedScore.dtw_score : 0);
+  const rawDtw = submission.scores?.dtw_score !== undefined 
+    ? submission.scores.dtw_score 
+    : (submission.detailedScore?.dtw_score !== undefined ? submission.detailedScore.dtw_score : 0);
+  const dtwScore = normalizeScore(rawDtw);
 
-  const whisperScore = submission.scores?.whisper_score !== undefined 
-    ? (submission.scores.whisper_score > 1 ? submission.scores.whisper_score : submission.scores.whisper_score * 100) 
-    : (submission.detailedScore?.whisper_raw_score ? submission.detailedScore.whisper_raw_score * 100 : 0);
+  const rawWhisper = submission.scores?.whisper_score !== undefined 
+    ? submission.scores.whisper_score 
+    : (submission.detailedScore?.whisper_raw_score !== undefined ? submission.detailedScore.whisper_raw_score : 0);
+  const whisperScore = normalizeScore(rawWhisper);
 
   // Generate fallback charScores if legacy submission doesn't have it
   const charScores: CharScoreItem[] = submission.charScores || submission.detailedScore?.char_scores || (
@@ -92,12 +101,6 @@ function AttemptAccordionItem({
       duration_feedback: null
     }))
   );
-
-  const worstChar: WorstCharItem | undefined = submission.worstChar || (
-    charScores.length > 0 ? charScores.reduce((min, c) => c.score < min.score ? c : min, charScores[0]) : undefined
-  );
-
-  const feedback = submission.feedback || submission.detailedScore?.feedback;
 
   return (
     <div className={`rounded-2xl border transition-all duration-300 overflow-hidden ${
@@ -121,31 +124,31 @@ function AttemptAccordionItem({
 
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-white">Lần thử {attemptNumber}</span>
+              <span className="font-bold text-sm text-white">Attempt #{attemptNumber}</span>
               {submission.isPassed ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">
-                  <CheckCircle2 className="w-3 h-3" /> Đạt
+                  <CheckCircle2 className="w-3 h-3" /> {t('practice.status_passed')}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
-                  <XCircle className="w-3 h-3" /> Chưa đạt
+                  <XCircle className="w-3 h-3" /> {t('practice.status_failed')}
                 </span>
               )}
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5">
               {submission.createdAt?.toDate 
-                ? submission.createdAt.toDate().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) 
-                : 'Vừa nộp'}
+                ? submission.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) 
+                : 'Just now'}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <span className="font-mono text-base font-black text-lime-400 block leading-tight">
-              {Math.round(totalScore)}%
+            <span className="font-mono text-lg font-black text-lime-400 block leading-tight">
+              {totalScore}
             </span>
-            <span className="text-[10px] text-gray-500">Tổng điểm</span>
+            <span className="text-[10px] text-gray-500">{t('practice.score_overall')}</span>
           </div>
 
           <div className={`p-1.5 rounded-xl bg-gray-900 text-gray-400 border border-gray-800 transition-transform duration-300 ${
@@ -159,23 +162,23 @@ function AttemptAccordionItem({
       {/* Expanded Accordion Body */}
       {isOpen && (
         <div className="p-4 sm:p-6 border-t border-gray-800/80 bg-gray-900/90 space-y-5 animate-in fade-in duration-200">
-          {/* 1. Score Breakdown 4 Components */}
+          {/* 1. Score Breakdown 4 Clean Cards (Integers 0 - 100 without %) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
-              <span className="text-gray-400 block text-[10px] uppercase font-bold">Chuẩn xác âm vị</span>
-              <strong className="text-blue-400 font-mono text-base font-bold">{phonemeScore.toFixed(1)}%</strong>
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_phonetics')}</span>
+              <strong className="text-blue-400 font-mono text-xl font-black">{phonemeScore}</strong>
             </div>
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
-              <span className="text-gray-400 block text-[10px] uppercase font-bold">Ngữ điệu (F0 DTW)</span>
-              <strong className="text-purple-400 font-mono text-base font-bold">{dtwScore.toFixed(1)}%</strong>
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_intonation')}</span>
+              <strong className="text-purple-400 font-mono text-xl font-black">{dtwScore}</strong>
             </div>
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
-              <span className="text-gray-400 block text-[10px] uppercase font-bold">Độ trọn vẹn (Whisper)</span>
-              <strong className="text-pink-400 font-mono text-base font-bold">{whisperScore.toFixed(1)}%</strong>
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_completeness')}</span>
+              <strong className="text-pink-400 font-mono text-xl font-black">{whisperScore}</strong>
             </div>
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
-              <span className="text-gray-400 block text-[10px] uppercase font-bold">Điểm tổng kết</span>
-              <strong className="text-lime-400 font-mono text-base font-extrabold">{totalScore.toFixed(1)}%</strong>
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_overall')}</span>
+              <strong className="text-lime-400 font-mono text-xl font-black">{totalScore}</strong>
             </div>
           </div>
 
@@ -183,13 +186,13 @@ function AttemptAccordionItem({
           {audioLoading ? (
             <div className="flex items-center justify-center p-6 bg-gray-950/80 rounded-2xl border border-gray-800 text-lime-400 text-xs gap-2">
               <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-lime-400"></div>
-              <span>Đang tải audio từ bộ nhớ lưu trữ...</span>
+              <span>Loading audio...</span>
             </div>
           ) : resolvedAudioUrl ? (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-bold text-gray-300">
                 <Volume2 className="w-4 h-4 text-lime-400" />
-                <span>Nghe lại giọng thu (Lần thử #{attemptNumber}):</span>
+                <span>Audio Playback (Attempt #{attemptNumber}):</span>
               </div>
               <DarkAudioPlayer
                 audioUrl={resolvedAudioUrl}
@@ -204,27 +207,15 @@ function AttemptAccordionItem({
                 }}
               />
             </div>
-          ) : (
-            <div className="p-3 bg-gray-950/60 rounded-xl border border-gray-800 text-xs text-gray-500 text-center">
-              Không tìm thấy file ghi âm cho lần nộp này.
-            </div>
-          )}
+          ) : null}
 
-          {/* 3. Karaoke-style Phoneme Visualizer */}
+          {/* 3. Word-Level Karaoke Visualizer */}
           <PhonemeKaraokeVisualizer
             expectedWord={expectedWord}
             charScores={charScores}
             currentTime={currentTime}
             duration={duration}
             isPlaying={isPlaying}
-          />
-
-          {/* 4. AI Phonetic Error Diagnostics Card */}
-          <PhonemeDiagnosticCard
-            worstChar={worstChar}
-            expectedWord={expectedWord}
-            feedback={feedback}
-            isPassed={submission.isPassed}
           />
         </div>
       )}
@@ -236,6 +227,7 @@ export default function StudentProgressChart({
   submissions,
   expectedWord
 }: StudentProgressChartProps) {
+  const { t } = useLanguage();
   if (!submissions || submissions.length === 0) return null;
 
   // Sort ascending by attemptNumber
@@ -243,17 +235,14 @@ export default function StudentProgressChart({
 
   // Calculate scores list
   const attemptsData = sorted.map((s, idx) => {
-    let total = 0;
-    if (s.detailedScore?.hybrid_target_score !== undefined) {
-      total = s.detailedScore.hybrid_target_score > 1 ? s.detailedScore.hybrid_target_score : s.detailedScore.hybrid_target_score * 100;
-    } else if (s.scores?.total_score !== undefined) {
-      total = s.scores.total_score * 100;
-    }
+    const rawTotal = s.detailedScore?.hybrid_target_score !== undefined
+      ? s.detailedScore.hybrid_target_score
+      : (s.scores?.total_score !== undefined ? s.scores.total_score : 0);
 
     return {
       submission: s,
       attemptNumber: s.attemptNumber || idx + 1,
-      total: Math.round(total),
+      total: normalizeScore(rawTotal),
       isPassed: s.isPassed,
       id: s.id || `attempt-${idx}`
     };
@@ -290,20 +279,20 @@ export default function StudentProgressChart({
           </div>
           <div>
             <h3 className="text-base font-bold text-white">
-              Tiến độ &amp; Lịch sử Luyện tập ({attemptsData.length} lần thử)
+              Practice Progress &amp; History ({attemptsData.length} attempts)
             </h3>
-            <p className="text-xs text-gray-400">Theo dõi sự tiến bộ điểm số qua từng lần nộp</p>
+            <p className="text-xs text-gray-400">Score progress across your attempts</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {scoreDiff > 0 ? (
             <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-black bg-green-500/20 text-green-400 border border-green-500/30">
-              +{scoreDiff}% tiến bộ 🎉
+              +{scoreDiff} points improvement 🎉
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-              Cao nhất: {bestScore}%
+              Best Score: {bestScore}
             </span>
           )}
         </div>
@@ -313,8 +302,8 @@ export default function StudentProgressChart({
       {attemptsData.length > 1 && (
         <div className="bg-gray-950/80 p-3 sm:p-4 rounded-2xl border border-gray-800/80 relative">
           <div className="text-[10px] text-gray-500 uppercase font-bold mb-1 flex justify-between">
-            <span>Biểu đồ điểm số tổng kết (%)</span>
-            <span>100%</span>
+            <span>Progress Score (0 - 100)</span>
+            <span>100</span>
           </div>
 
           <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-24 overflow-visible">
@@ -363,7 +352,7 @@ export default function StudentProgressChart({
                   fontWeight="bold"
                   fontFamily="monospace"
                 >
-                  {p.data.total}%
+                  {p.data.total}
                 </text>
                 <text
                   x={p.x}
@@ -385,7 +374,7 @@ export default function StudentProgressChart({
       <div className="space-y-3">
         <h4 className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
           <Clock className="w-3.5 h-3.5 text-gray-400" />
-          <span>Chi tiết các lần nộp (Bấm vào để mở rộng Playback &amp; Karaoke):</span>
+          <span>Attempts History (Click to expand Playback &amp; Karaoke):</span>
         </h4>
 
         <div className="space-y-3">

@@ -517,14 +517,6 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                                     duration={karaokeDuration}
                                     isPlaying={isKaraokePlaying}
                                   />
-
-                                  {/* AI Phonetic Diagnostics Card */}
-                                  <PhonemeDiagnosticCard
-                                    worstChar={displayWorstChar}
-                                    expectedWord={assignment.word}
-                                    feedback={displayFeedback}
-                                    isPassed={displayIsPassed}
-                                  />
                                 </div>
                               )}
 
