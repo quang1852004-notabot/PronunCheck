@@ -12,6 +12,9 @@ import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
 import PhonemeKaraokeVisualizer from '@/app/components/PhonemeKaraokeVisualizer';
 import PhonemeDiagnosticCard, { CharScoreItem, WorstCharItem } from '@/app/components/PhonemeDiagnosticCard';
 import StudentProgressChart from '@/app/components/StudentProgressChart';
+import ErrorBoundary from '@/app/components/ErrorBoundary';
+import { startAiTimer, endAiTimer, captureAppError } from '@/app/lib/monitoring';
+import { track } from '@vercel/analytics';
 import { 
   getClass, 
   getAssignments, 
@@ -152,6 +155,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     setSubmittingId(assignmentId);
     setAssessmentResult(null);
     setSelectedHistorySub(null);
+    const startTime = startAiTimer(`class-assess-${assignmentId}`);
 
     try {
       const subs = await getSubmissionsByStudent(classId, user.uid, assignmentId);
@@ -189,10 +193,21 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       });
 
       if (!res.ok) {
-        throw new Error('Lỗi khi chấm điểm từ máy chủ.');
+        throw new Error(`Máy chủ trả về mã lỗi ${res.status}`);
       }
 
       const data = await res.json();
+      const durationMs = endAiTimer(expectedWord, startTime, `class-assess-${assignmentId}`);
+
+      // Theo dõi custom event trên Vercel Analytics
+      track('class_assignment_assessed', {
+        classId,
+        assignmentId,
+        word: expectedWord,
+        duration_ms: durationMs,
+        is_passed: data.assessment?.is_passed ? 1 : 0,
+      });
+
       const assessment = data.assessment;
       const charScores: CharScoreItem[] = data.char_scores || [];
       const worstChar: WorstCharItem | undefined = assessment.worst_char_detail || (charScores.length > 0 ? charScores.reduce((min, c) => c.score < min.score ? c : min, charScores[0]) : undefined);
@@ -244,7 +259,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       await loadData();
 
     } catch (err: any) {
-      console.error(err);
+      captureAppError(err, { classId, assignmentId, expectedWord });
       toastError(err.message || 'Có lỗi xảy ra khi nộp bài.');
     } finally {
       setSubmittingId(null);
@@ -334,216 +349,203 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
             </div>
           ) : (
             /* Member Mode: Render Assigned Exercises */
-            <div className="space-y-6">
-              <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-lime-400" />
-                {t('practice.assignments_to_do')} ({assignments.length})
-              </h2>
+            <ErrorBoundary fallbackTitle="Lỗi hiển thị bài tập lớp">
+              <div className="space-y-6">
+                <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-lime-400" />
+                  {t('practice.assignments_to_do')} ({assignments.length})
+                </h2>
 
-              {assignments.length === 0 ? (
-                <div className="bg-gray-800/60 rounded-3xl p-8 sm:p-12 text-center text-gray-400 border border-gray-700/70">
-                  {t('practice.no_assignments')}
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {assignments.map((assignment) => {
-                    const remainingAttempts = Math.max(0, assignment.maxAttempts - assignment.attemptsUsed);
-                    const isDeadlinePassed = assignment.deadline ? new Date() > assignment.deadline.toDate() : false;
-                    const isMaxAttemptsReached = assignment.attemptsUsed >= assignment.maxAttempts;
+                {assignments.length === 0 ? (
+                  <div className="bg-gray-800/60 rounded-3xl p-8 sm:p-12 text-center text-gray-400 border border-gray-700/70">
+                    {t('practice.no_assignments')}
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {assignments.map((assignment) => {
+                      const remainingAttempts = Math.max(0, assignment.maxAttempts - assignment.attemptsUsed);
+                      const isDeadlinePassed = assignment.deadline ? new Date() > assignment.deadline.toDate() : false;
+                      const isMaxAttemptsReached = assignment.attemptsUsed >= assignment.maxAttempts;
 
-                    let statusBadge = (
-                      <span className="bg-yellow-900/40 text-yellow-400 px-3 py-1 rounded-full text-xs font-bold border border-yellow-500/30 whitespace-nowrap">
-                        ⏳ {t('practice.status_pending')}
-                      </span>
-                    );
-
-                    if (assignment.isPassed) {
-                      statusBadge = (
-                        <span className="bg-green-900/40 text-green-400 px-3 py-1 rounded-full text-xs font-bold border border-green-500/30 whitespace-nowrap flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> {t('practice.status_passed')}
+                      let statusBadge = (
+                        <span className="bg-yellow-900/40 text-yellow-400 px-3 py-1 rounded-full text-xs font-bold border border-yellow-500/30 whitespace-nowrap">
+                          ⏳ {t('practice.status_pending')}
                         </span>
                       );
-                    } else if (assignment.attemptsUsed > 0 && !assignment.isPassed) {
-                      statusBadge = (
-                        <span className="bg-red-900/40 text-red-400 px-3 py-1 rounded-full text-xs font-bold border border-red-500/30 whitespace-nowrap flex items-center gap-1">
-                          <XCircle className="w-3.5 h-3.5" /> {t('practice.status_failed')}
-                        </span>
-                      );
-                    }
 
-                    const isOpen = activeAssignmentId === assignment.id;
+                      if (assignment.isPassed) {
+                        statusBadge = (
+                          <span className="bg-green-900/40 text-green-400 px-3 py-1 rounded-full text-xs font-bold border border-green-500/30 whitespace-nowrap flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> {t('practice.status_passed')}
+                          </span>
+                        );
+                      } else if (assignment.attemptsUsed > 0 && !assignment.isPassed) {
+                        statusBadge = (
+                          <span className="bg-red-900/40 text-red-400 px-3 py-1 rounded-full text-xs font-bold border border-red-500/30 whitespace-nowrap flex items-center gap-1">
+                            <XCircle className="w-3.5 h-3.5" /> {t('practice.status_failed')}
+                          </span>
+                        );
+                      }
 
-                    // Determine active data to show (either from selected history or latest assessment)
-                    const activeViewSub = selectedHistorySub?.assignmentId === assignment.id ? selectedHistorySub : null;
-                    const displayCharScores = activeViewSub?.charScores || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.charScores : undefined);
-                    const displayWorstChar = activeViewSub?.worstChar || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.worstChar : undefined);
-                    const displayFeedback = activeViewSub?.feedback || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.feedback : undefined);
-                    const displayAudioUrl = activeViewSub?.audioUrl || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.audioUrl : undefined);
-                    const displayIsPassed = activeViewSub ? activeViewSub.isPassed : (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.passed : assignment.isPassed);
+                      const isOpen = activeAssignmentId === assignment.id;
 
-                    return (
-                      <div 
-                        key={assignment.id} 
-                        className={`bg-gray-800/90 rounded-3xl p-5 sm:p-6 border transition-all duration-200 ${
-                          isOpen ? 'border-lime-400/60 shadow-2xl shadow-lime-500/5' : 'border-gray-700/80 hover:border-gray-600'
-                        }`}
-                      >
+                      // Determine active data to show (either from selected history or latest assessment)
+                      const activeViewSub = selectedHistorySub?.assignmentId === assignment.id ? selectedHistorySub : null;
+                      const displayCharScores = activeViewSub?.charScores || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.charScores : undefined);
+                      const displayWorstChar = activeViewSub?.worstChar || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.worstChar : undefined);
+                      const displayFeedback = activeViewSub?.feedback || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.feedback : undefined);
+                      const displayAudioUrl = activeViewSub?.audioUrl || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.audioUrl : undefined);
+                      const displayIsPassed = activeViewSub ? activeViewSub.isPassed : (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.passed : assignment.isPassed);
+
+                      return (
                         <div 
-                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer select-none"
-                          onClick={() => {
-                            setActiveAssignmentId(isOpen ? null : (assignment.id || null));
-                            if (!isOpen) {
-                              setAssessmentResult(null);
-                              setSelectedHistorySub(null);
-                            }
-                          }}
+                          key={assignment.id} 
+                          className={`bg-gray-800/90 rounded-3xl p-5 sm:p-6 border transition-all duration-200 ${
+                            isOpen ? 'border-lime-400/60 shadow-2xl shadow-lime-500/5' : 'border-gray-700/80 hover:border-gray-600'
+                          }`}
                         >
-                          <div className="space-y-1">
-                            {assignment.title ? (
-                              <>
-                                <h3 className="text-xl sm:text-2xl font-extrabold text-white">{assignment.title}</h3>
-                                <p className="text-base font-mono text-lime-400 font-bold">{assignment.word}</p>
-                              </>
-                            ) : (
-                              <h3 className="text-2xl font-bold text-white font-mono">{assignment.word}</h3>
-                            )}
-                            <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-400 pt-1">
-                              <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
-                                {t('practice.target_phoneme')}: <strong className="text-lime-400">{assignment.targetPhoneme}</strong>
-                              </span>
-                              <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
-                                {t('practice.attempts_left')}: <strong className="text-white">{remainingAttempts}/{assignment.maxAttempts}</strong>
-                              </span>
-                              {assignment.deadline && (
-                                <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
-                                  {t('practice.deadline')}: {assignment.deadline.toDate().toLocaleString('vi-VN')}
-                                </span>
+                          <div 
+                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer select-none"
+                            onClick={() => {
+                              setActiveAssignmentId(isOpen ? null : (assignment.id || null));
+                              if (!isOpen) {
+                                setAssessmentResult(null);
+                                setSelectedHistorySub(null);
+                              }
+                            }}
+                          >
+                            <div className="space-y-1">
+                              {assignment.title ? (
+                                <>
+                                  <h3 className="text-xl sm:text-2xl font-extrabold text-white">{assignment.title}</h3>
+                                  <p className="text-base font-mono text-lime-400 font-bold">{assignment.word}</p>
+                                </>
+                              ) : (
+                                <h3 className="text-2xl font-bold text-white font-mono">{assignment.word}</h3>
                               )}
+                              <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-400 pt-1">
+                                <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
+                                  {t('practice.target_phoneme')}: <strong className="text-lime-400">{assignment.targetPhoneme}</strong>
+                                </span>
+                                <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
+                                  {t('practice.attempts_left')}: <strong className="text-white">{remainingAttempts}/{assignment.maxAttempts}</strong>
+                                </span>
+                                {assignment.deadline && (
+                                  <span className="bg-gray-900/80 px-2.5 py-1 rounded-lg border border-gray-700/60">
+                                    {t('practice.deadline')}: {assignment.deadline.toDate().toLocaleString('vi-VN')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-700/60">
+                              {statusBadge}
+                              <div className={`p-1.5 rounded-lg bg-gray-900 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180 text-lime-400' : ''}`}>
+                                <ChevronDown className="w-4 h-4" />
+                              </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-700/60">
-                            {statusBadge}
-                            <div className={`p-1.5 rounded-lg bg-gray-900 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180 text-lime-400' : ''}`}>
-                              <ChevronDown className="w-4 h-4" />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Dropdown Recording & History Area */}
-                        {isOpen && (
-                          <div className="mt-6 pt-6 border-t border-gray-700/80 space-y-6 animate-in fade-in duration-200">
-                            {/* Recording Form if still allowed */}
-                            {!assignment.isActive ? (
-                              <div className="p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-2xl text-sm font-medium">
-                                {t('practice.assignment_locked')}
-                              </div>
-                            ) : isDeadlinePassed ? (
-                              <div className="p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-2xl text-sm font-medium">
-                                {t('practice.deadline_passed')}
-                              </div>
-                            ) : isMaxAttemptsReached && !assignment.isPassed ? (
-                              <div className="p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-2xl text-sm font-medium">
-                                {t('practice.max_attempts_reached')}
-                              </div>
-                            ) : (
-                              <div className="space-y-3">
-                                <h4 className="text-xs font-bold text-gray-300">
-                                  {assignment.isPassed ? 'Luyện tập thêm để nâng cao điểm số:' : 'Ghi âm nộp bài:'}
-                                </h4>
-                                <AudioRecorder 
-                                  onAudioReady={(blob) => handleAudioReady(assignment.id!, assignment.word, assignment.targetPhoneme, blob)}
-                                  disabled={submittingId === assignment.id}
-                                />
-                              </div>
-                            )}
-
-                            {submittingId === assignment.id && (
-                              <div className="flex items-center gap-3 text-lime-400 text-sm font-medium animate-pulse py-4 justify-center bg-gray-900/60 rounded-2xl border border-gray-800">
-                                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-lime-400"></div>
-                                <span>Đang phân tích âm vị AI (Wav2Vec2, FastDTW, Whisper)...</span>
-                              </div>
-                            )}
-
-                            {/* Karaoke Visualizer & AI Diagnostics for Active View */}
-                            {(displayCharScores || displayWorstChar || displayFeedback) && !submittingId && (
-                              <div className="space-y-5 pt-2 border-t border-gray-700/80 animate-in fade-in duration-300">
-                                <div className="flex items-center justify-between">
-                                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                                    <Sparkles className="w-4 h-4 text-lime-400" />
-                                    <span>
-                                      {activeViewSub 
-                                        ? `Đang xem lại Lần thử #${activeViewSub.attemptNumber}` 
-                                        : 'Kết quả Đánh giá Vừa Nộp:'}
-                                    </span>
-                                  </h4>
-                                  {activeViewSub && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedHistorySub(null)}
-                                      className="text-xs text-lime-400 hover:underline flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <RefreshCcw className="w-3 h-3" /> Xem kết quả mới nhất
-                                    </button>
+                          {/* Dropdown Recording & History Area */}
+                          {isOpen && (
+                            <div className="mt-6 pt-6 border-t border-gray-700/80 space-y-6 animate-in fade-in duration-200">
+                              {isDeadlinePassed ? (
+                                <p className="text-sm text-red-400 font-bold text-center py-2">{t('practice.deadline_passed')}</p>
+                              ) : isMaxAttemptsReached ? (
+                                <p className="text-sm text-yellow-400 font-bold text-center py-2">{t('practice.max_attempts_reached')}</p>
+                              ) : (
+                                <div className="space-y-4">
+                                  <AudioRecorder 
+                                    onAudioReady={(blob) => handleAudioReady(assignment.id || '', assignment.word, assignment.targetPhoneme, blob)}
+                                    disabled={submittingId === assignment.id}
+                                  />
+                                  {submittingId === assignment.id && (
+                                    <div className="flex flex-col items-center justify-center p-4 space-y-2">
+                                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-lime-400"></div>
+                                      <p className="text-xs text-lime-400 font-medium animate-pulse">{t('common.processing')}</p>
+                                    </div>
                                   )}
                                 </div>
+                              )}
 
-                                {/* Custom Dark Mode Audio Player for Playback & Karaoke Sync */}
-                                {displayAudioUrl && (
-                                  <DarkAudioPlayer
-                                    audioUrl={displayAudioUrl}
-                                    onTimeUpdate={(cTime, dur) => {
-                                      setKaraokeCurrentTime(cTime);
-                                      setKaraokeDuration(dur);
-                                      setIsKaraokePlaying(true);
-                                    }}
-                                    onEnded={() => {
-                                      setIsKaraokePlaying(false);
-                                      setKaraokeCurrentTime(0);
-                                    }}
+                              {/* Assessment Feedback & Diagnostics Area */}
+                              {(activeViewSub || (assessmentResult && activeAssignmentId === assignment.id)) && (
+                                <div className="space-y-6 pt-4 border-t border-gray-700/80">
+                                  {/* Result Summary Card */}
+                                  <div className={`p-5 rounded-2xl text-center border space-y-3 ${
+                                    displayIsPassed 
+                                      ? 'bg-green-950/40 border-green-500/40 text-green-100' 
+                                      : 'bg-red-950/40 border-red-500/40 text-red-100'
+                                  }`}>
+                                    <div className="flex items-center justify-center gap-2">
+                                      {displayIsPassed ? (
+                                        <CheckCircle2 className="w-7 h-7 text-green-400" />
+                                      ) : (
+                                        <XCircle className="w-7 h-7 text-red-400" />
+                                      )}
+                                      <h4 className={`text-xl font-bold ${displayIsPassed ? 'text-green-400' : 'text-red-400'}`}>
+                                        {displayIsPassed ? t('practice.status_passed') : t('practice.status_failed')}
+                                      </h4>
+                                    </div>
+
+                                    {displayFeedback && (
+                                      <p className="text-sm font-medium text-gray-200">{displayFeedback}</p>
+                                    )}
+                                  </div>
+
+                                  {/* Playback Audio for this assignment */}
+                                  {displayAudioUrl && (
+                                    <DarkAudioPlayer
+                                      audioUrl={displayAudioUrl}
+                                      onTimeUpdate={(cTime, dur) => {
+                                        setKaraokeCurrentTime(cTime);
+                                        setKaraokeDuration(dur);
+                                        setIsKaraokePlaying(true);
+                                      }}
+                                      onEnded={() => {
+                                        setIsKaraokePlaying(false);
+                                        setKaraokeCurrentTime(0);
+                                      }}
+                                    />
+                                  )}
+
+                                  {/* AI Phonetic Karaoke Visualizer */}
+                                  <PhonemeKaraokeVisualizer
+                                    expectedWord={assignment.word}
+                                    charScores={displayCharScores}
+                                    currentTime={karaokeCurrentTime}
+                                    duration={karaokeDuration}
+                                    isPlaying={isKaraokePlaying}
                                   />
-                                )}
 
-                                {/* Karaoke Visualizer Synchronized with Player */}
-                                <PhonemeKaraokeVisualizer
-                                  expectedWord={assignment.word}
-                                  charScores={displayCharScores}
-                                  currentTime={karaokeCurrentTime}
-                                  duration={karaokeDuration}
-                                  isPlaying={isKaraokePlaying}
-                                />
+                                  {/* AI Phonetic Diagnostics Card */}
+                                  <PhonemeDiagnosticCard
+                                    worstChar={displayWorstChar}
+                                    expectedWord={assignment.word}
+                                    feedback={displayFeedback}
+                                    isPassed={displayIsPassed}
+                                  />
+                                </div>
+                              )}
 
-                                {/* AI Phonetic Diagnostics Card */}
-                                <PhonemeDiagnosticCard
-                                  worstChar={displayWorstChar}
-                                  expectedWord={assignment.word}
-                                  feedback={displayFeedback}
-                                  isPassed={displayIsPassed}
-                                />
-                              </div>
-                            )}
-
-                            {/* Student Progress History Timeline & Mini Chart */}
-                            {assignment.submissions && assignment.submissions.length > 0 && (
-                              <div className="pt-4 border-t border-gray-700/80">
-                                <StudentProgressChart
-                                  submissions={assignment.submissions}
-                                  selectedSubmissionId={selectedHistorySub?.id}
-                                  onSelectSubmission={(sub) => {
-                                    setSelectedHistorySub(sub);
-                                    setKaraokeCurrentTime(0);
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                              {/* Student Progress History Timeline with In-place Playback & Karaoke */}
+                              {assignment.submissions && assignment.submissions.length > 0 && (
+                                <div className="pt-4 border-t border-gray-700/80">
+                                  <StudentProgressChart
+                                    submissions={assignment.submissions}
+                                    expectedWord={assignment.word}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </ErrorBoundary>
           )}
         </div>
       </main>

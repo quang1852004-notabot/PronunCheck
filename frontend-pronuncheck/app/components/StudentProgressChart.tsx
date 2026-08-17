@@ -1,19 +1,240 @@
 'use client';
 
-import React from 'react';
-import { TrendingUp, Award, Clock, Volume2, CheckCircle2, XCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { 
+  TrendingUp, 
+  Clock, 
+  CheckCircle2, 
+  XCircle, 
+  ChevronDown, 
+  Volume2, 
+  Sparkles,
+  Info,
+  Layers
+} from 'lucide-react';
 import { SubmissionData } from '@/app/lib/firestore';
+import { getAudioUrl } from '@/app/lib/storage';
+import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
+import PhonemeKaraokeVisualizer from '@/app/components/PhonemeKaraokeVisualizer';
+import PhonemeDiagnosticCard, { CharScoreItem, WorstCharItem } from '@/app/components/PhonemeDiagnosticCard';
 
 interface StudentProgressChartProps {
   submissions: SubmissionData[];
-  selectedSubmissionId?: string | null;
-  onSelectSubmission?: (sub: SubmissionData) => void;
+  expectedWord: string;
+}
+
+// Single Expandable Attempt Accordion Item
+function AttemptAccordionItem({
+  submission,
+  attemptNumber,
+  expectedWord
+}: {
+  submission: SubmissionData;
+  attemptNumber: number;
+  expectedWord: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [resolvedAudioUrl, setResolvedAudioUrl] = useState<string | null>(submission.audioUrl || null);
+  const [audioLoading, setAudioLoading] = useState(false);
+
+  // Playback sync for Karaoke
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  // Load storage audio url if not present
+  useEffect(() => {
+    if (isOpen && !resolvedAudioUrl) {
+      const storagePath = submission.audioStoragePath || (submission as any).audioPath;
+      if (storagePath) {
+        setAudioLoading(true);
+        getAudioUrl(storagePath)
+          .then(url => {
+            setResolvedAudioUrl(url);
+          })
+          .catch(err => {
+            console.error('Error fetching audio url:', err);
+          })
+          .finally(() => {
+            setAudioLoading(false);
+          });
+      }
+    }
+  }, [isOpen, resolvedAudioUrl, submission]);
+
+  let totalScore = 0;
+  if (submission.detailedScore?.hybrid_target_score !== undefined) {
+    totalScore = submission.detailedScore.hybrid_target_score > 1 
+      ? submission.detailedScore.hybrid_target_score 
+      : submission.detailedScore.hybrid_target_score * 100;
+  } else if (submission.scores?.total_score !== undefined) {
+    totalScore = submission.scores.total_score * 100;
+  }
+
+  const phonemeScore = submission.scores?.phoneme_score !== undefined 
+    ? (submission.scores.phoneme_score > 1 ? submission.scores.phoneme_score : submission.scores.phoneme_score * 100) 
+    : (submission.detailedScore?.wav2vec_raw_score ? submission.detailedScore.wav2vec_raw_score * 100 : 0);
+
+  const dtwScore = submission.scores?.dtw_score !== undefined 
+    ? (submission.scores.dtw_score > 1 ? submission.scores.dtw_score : submission.scores.dtw_score * 100) 
+    : (submission.detailedScore?.dtw_score ? submission.detailedScore.dtw_score : 0);
+
+  const whisperScore = submission.scores?.whisper_score !== undefined 
+    ? (submission.scores.whisper_score > 1 ? submission.scores.whisper_score : submission.scores.whisper_score * 100) 
+    : (submission.detailedScore?.whisper_raw_score ? submission.detailedScore.whisper_raw_score * 100 : 0);
+
+  // Generate fallback charScores if legacy submission doesn't have it
+  const charScores: CharScoreItem[] = submission.charScores || submission.detailedScore?.char_scores || (
+    expectedWord.split('').filter(c => c !== ' ').map((char) => ({
+      char,
+      score: phonemeScore > 0 ? phonemeScore / 100 : 0.75,
+      actual: char,
+      duration_feedback: null
+    }))
+  );
+
+  const worstChar: WorstCharItem | undefined = submission.worstChar || (
+    charScores.length > 0 ? charScores.reduce((min, c) => c.score < min.score ? c : min, charScores[0]) : undefined
+  );
+
+  const feedback = submission.feedback || submission.detailedScore?.feedback;
+
+  return (
+    <div className={`rounded-2xl border transition-all duration-300 overflow-hidden ${
+      isOpen 
+        ? 'bg-gray-950/95 border-lime-400/60 shadow-2xl shadow-lime-500/10' 
+        : 'bg-gray-950/60 border-gray-800 hover:border-gray-700 hover:bg-gray-900/80'
+    }`}>
+      {/* Accordion Header (Clickable) */}
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className="p-4 flex items-center justify-between gap-3 cursor-pointer select-none"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-mono font-black text-xs shadow-sm ${
+            submission.isPassed 
+              ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+              : 'bg-red-500/20 text-red-400 border border-red-500/30'
+          }`}>
+            #{attemptNumber}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm text-white">Lần thử {attemptNumber}</span>
+              {submission.isPassed ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">
+                  <CheckCircle2 className="w-3 h-3" /> Đạt
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
+                  <XCircle className="w-3 h-3" /> Chưa đạt
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              {submission.createdAt?.toDate 
+                ? submission.createdAt.toDate().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) 
+                : 'Vừa nộp'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <span className="font-mono text-base font-black text-lime-400 block leading-tight">
+              {Math.round(totalScore)}%
+            </span>
+            <span className="text-[10px] text-gray-500">Tổng điểm</span>
+          </div>
+
+          <div className={`p-1.5 rounded-xl bg-gray-900 text-gray-400 border border-gray-800 transition-transform duration-300 ${
+            isOpen ? 'rotate-180 text-lime-400 border-lime-400/40' : ''
+          }`}>
+            <ChevronDown className="w-4 h-4" />
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded Accordion Body */}
+      {isOpen && (
+        <div className="p-4 sm:p-6 border-t border-gray-800/80 bg-gray-900/90 space-y-5 animate-in fade-in duration-200">
+          {/* 1. Score Breakdown 4 Components */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+            <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">Chuẩn xác âm vị</span>
+              <strong className="text-blue-400 font-mono text-base font-bold">{phonemeScore.toFixed(1)}%</strong>
+            </div>
+            <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">Ngữ điệu (F0 DTW)</span>
+              <strong className="text-purple-400 font-mono text-base font-bold">{dtwScore.toFixed(1)}%</strong>
+            </div>
+            <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">Độ trọn vẹn (Whisper)</span>
+              <strong className="text-pink-400 font-mono text-base font-bold">{whisperScore.toFixed(1)}%</strong>
+            </div>
+            <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
+              <span className="text-gray-400 block text-[10px] uppercase font-bold">Điểm tổng kết</span>
+              <strong className="text-lime-400 font-mono text-base font-extrabold">{totalScore.toFixed(1)}%</strong>
+            </div>
+          </div>
+
+          {/* 2. Playback Audio Player */}
+          {audioLoading ? (
+            <div className="flex items-center justify-center p-6 bg-gray-950/80 rounded-2xl border border-gray-800 text-lime-400 text-xs gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-lime-400"></div>
+              <span>Đang tải audio từ bộ nhớ lưu trữ...</span>
+            </div>
+          ) : resolvedAudioUrl ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-gray-300">
+                <Volume2 className="w-4 h-4 text-lime-400" />
+                <span>Nghe lại giọng thu (Lần thử #{attemptNumber}):</span>
+              </div>
+              <DarkAudioPlayer
+                audioUrl={resolvedAudioUrl}
+                onTimeUpdate={(cTime, dur) => {
+                  setCurrentTime(cTime);
+                  setDuration(dur);
+                  setIsPlaying(true);
+                }}
+                onEnded={() => {
+                  setIsPlaying(false);
+                  setCurrentTime(0);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="p-3 bg-gray-950/60 rounded-xl border border-gray-800 text-xs text-gray-500 text-center">
+              Không tìm thấy file ghi âm cho lần nộp này.
+            </div>
+          )}
+
+          {/* 3. Karaoke-style Phoneme Visualizer */}
+          <PhonemeKaraokeVisualizer
+            expectedWord={expectedWord}
+            charScores={charScores}
+            currentTime={currentTime}
+            duration={duration}
+            isPlaying={isPlaying}
+          />
+
+          {/* 4. AI Phonetic Error Diagnostics Card */}
+          <PhonemeDiagnosticCard
+            worstChar={worstChar}
+            expectedWord={expectedWord}
+            feedback={feedback}
+            isPassed={submission.isPassed}
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function StudentProgressChart({
   submissions,
-  selectedSubmissionId,
-  onSelectSubmission
+  expectedWord
 }: StudentProgressChartProps) {
   if (!submissions || submissions.length === 0) return null;
 
@@ -29,15 +250,10 @@ export default function StudentProgressChart({
       total = s.scores.total_score * 100;
     }
 
-    const phoneme = s.scores?.phoneme_score !== undefined 
-      ? (s.scores.phoneme_score > 1 ? s.scores.phoneme_score : s.scores.phoneme_score * 100) 
-      : 0;
-
     return {
       submission: s,
       attemptNumber: s.attemptNumber || idx + 1,
       total: Math.round(total),
-      phoneme: Math.round(phoneme),
       isPassed: s.isPassed,
       id: s.id || `attempt-${idx}`
     };
@@ -50,7 +266,7 @@ export default function StudentProgressChart({
 
   // Generate SVG Points for Line Chart
   const svgWidth = 360;
-  const svgHeight = 120;
+  const svgHeight = 110;
   const paddingX = 30;
   const paddingY = 20;
 
@@ -58,7 +274,6 @@ export default function StudentProgressChart({
     const x = attemptsData.length === 1 
       ? svgWidth / 2 
       : paddingX + (i / (attemptsData.length - 1)) * (svgWidth - paddingX * 2);
-    // Y: 0 score = height - paddingY, 100 score = paddingY
     const y = (svgHeight - paddingY) - (d.total / 100) * (svgHeight - paddingY * 2);
     return { x, y, data: d };
   });
@@ -67,7 +282,7 @@ export default function StudentProgressChart({
 
   return (
     <div className="w-full bg-gray-900/90 backdrop-blur-md p-5 sm:p-6 rounded-3xl border border-gray-700/80 shadow-2xl space-y-6 select-none">
-      {/* Header & Stats Cards */}
+      {/* Header & Stats */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-800 pb-4">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center shadow-lg shadow-blue-500/10">
@@ -102,20 +317,17 @@ export default function StudentProgressChart({
             <span>100%</span>
           </div>
 
-          <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-28 overflow-visible">
-            {/* Horizontal Grid lines */}
+          <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-24 overflow-visible">
             <line x1="0" y1={paddingY} x2={svgWidth} y2={paddingY} stroke="#374151" strokeDasharray="3 3" />
             <line x1="0" y1={svgHeight / 2} x2={svgWidth} y2={svgHeight / 2} stroke="#374151" strokeDasharray="3 3" />
             <line x1="0" y1={svgHeight - paddingY} x2={svgWidth} y2={svgHeight - paddingY} stroke="#374151" />
 
-            {/* Filled Area below line */}
             <polygon
               points={`0,${svgHeight - paddingY} ${pointsPath} ${svgWidth},${svgHeight - paddingY}`}
               fill="url(#progressGradient)"
               opacity="0.3"
             />
 
-            {/* Gradient definition */}
             <defs>
               <linearGradient id="progressGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#a3e635" />
@@ -123,7 +335,6 @@ export default function StudentProgressChart({
               </linearGradient>
             </defs>
 
-            {/* Line connecting points */}
             <polyline
               points={pointsPath}
               fill="none"
@@ -133,114 +344,59 @@ export default function StudentProgressChart({
               strokeLinejoin="round"
             />
 
-            {/* Interactive Points */}
-            {points.map((p, idx) => {
-              const isSelected = selectedSubmissionId === p.data.submission.id;
-              return (
-                <g 
-                  key={idx} 
-                  className="cursor-pointer group"
-                  onClick={() => onSelectSubmission && onSelectSubmission(p.data.submission)}
+            {points.map((p, idx) => (
+              <g key={idx}>
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={5}
+                  fill={p.data.isPassed ? '#4ade80' : '#f87171'}
+                  stroke="#030712"
+                  strokeWidth="2"
+                />
+                <text
+                  x={p.x}
+                  y={p.y - 8}
+                  textAnchor="middle"
+                  fill="#e5e7eb"
+                  fontSize="10"
+                  fontWeight="bold"
+                  fontFamily="monospace"
                 >
-                  <circle
-                    cx={p.x}
-                    cy={p.y}
-                    r={isSelected ? 7 : 5}
-                    fill={p.data.isPassed ? '#4ade80' : '#f87171'}
-                    stroke="#030712"
-                    strokeWidth="2"
-                    className="transition-transform group-hover:scale-125"
-                  />
-                  <text
-                    x={p.x}
-                    y={p.y - 10}
-                    textAnchor="middle"
-                    fill="#e5e7eb"
-                    fontSize="10"
-                    fontWeight="bold"
-                    fontFamily="monospace"
-                  >
-                    {p.data.total}%
-                  </text>
-                  <text
-                    x={p.x}
-                    y={svgHeight - 4}
-                    textAnchor="middle"
-                    fill="#9ca3af"
-                    fontSize="9"
-                    fontFamily="sans-serif"
-                  >
-                    #{p.data.attemptNumber}
-                  </text>
-                </g>
-              );
-            })}
+                  {p.data.total}%
+                </text>
+                <text
+                  x={p.x}
+                  y={svgHeight - 3}
+                  textAnchor="middle"
+                  fill="#9ca3af"
+                  fontSize="9"
+                  fontFamily="sans-serif"
+                >
+                  #{p.data.attemptNumber}
+                </text>
+              </g>
+            ))}
           </svg>
         </div>
       )}
 
-      {/* Attempt Cards List - Clickable to review past attempt */}
-      <div className="space-y-2">
+      {/* Accordion List for Each Attempt */}
+      <div className="space-y-3">
         <h4 className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
           <Clock className="w-3.5 h-3.5 text-gray-400" />
-          <span>Danh sách các lần nộp (Bấm vào để xem lại chi tiết):</span>
+          <span>Chi tiết các lần nộp (Bấm vào để mở rộng Playback &amp; Karaoke):</span>
         </h4>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-          {sorted.map((sub, idx) => {
-            const isSelected = selectedSubmissionId === sub.id;
-            let total = 0;
-            if (sub.detailedScore?.hybrid_target_score !== undefined) {
-              total = sub.detailedScore.hybrid_target_score > 1 ? sub.detailedScore.hybrid_target_score : sub.detailedScore.hybrid_target_score * 100;
-            } else if (sub.scores?.total_score !== undefined) {
-              total = sub.scores.total_score * 100;
-            }
-
-            return (
-              <button
-                key={sub.id || idx}
-                type="button"
-                onClick={() => onSelectSubmission && onSelectSubmission(sub)}
-                className={`p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-center justify-between gap-3 ${
-                  isSelected 
-                    ? 'bg-blue-950/60 border-blue-400 ring-2 ring-blue-400/40 shadow-lg shadow-blue-500/15 scale-[1.02]' 
-                    : 'bg-gray-950/60 border-gray-800 hover:border-gray-700 hover:bg-gray-900'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-bold text-xs ${
-                    sub.isPassed ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                  }`}>
-                    #{sub.attemptNumber || idx + 1}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-xs text-white">Lần thử {sub.attemptNumber || idx + 1}</span>
-                      {sub.isPassed ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
-                      ) : (
-                        <XCircle className="w-3.5 h-3.5 text-red-400" />
-                      )}
-                    </div>
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      {sub.createdAt ? (
-                        sub.createdAt.toDate ? sub.createdAt.toDate().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : 'Vừa xong'
-                      ) : 'Vừa xong'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="text-right">
-                  <span className="font-mono text-sm font-black text-lime-400 block">
-                    {Math.round(total)}%
-                  </span>
-                  <span className={`text-[10px] font-medium ${sub.isPassed ? 'text-green-400' : 'text-red-400'}`}>
-                    {sub.isPassed ? 'Đạt' : 'Chưa đạt'}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+        <div className="space-y-3">
+          {sorted.map((sub, idx) => (
+            <AttemptAccordionItem
+              key={sub.id || idx}
+              submission={sub}
+              attemptNumber={sub.attemptNumber || idx + 1}
+              expectedWord={expectedWord}
+            />
+          ))}
         </div>
       </div>
     </div>

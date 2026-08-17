@@ -78,18 +78,21 @@ export default function ScoringConfigComponent({ classId, initialConfig }: Scori
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
               <div className="bg-gray-900/90 p-3 rounded-xl border border-gray-700">
-                <p className="font-bold text-blue-300 mb-0.5">🔤 Từ đơn / Từ ngắn (L &le; 3 từ)</p>
+                <p className="font-bold text-blue-300 mb-0.5">🔤 Từ đơn / Đoạn ngắn (Độ dài hiệu dụng L &le; 3)</p>
                 <p className="text-gray-400 text-[11px]">
-                  Tự động ưu tiên <strong>82% Âm vị học</strong> (Wav2Vec2 + Luật Ich/Ach) và <strong>18% Ngữ điệu</strong>.
+                  Tự động ưu tiên <strong>82% Âm vị học</strong> (Wav2Vec2 + Luật Ich/Ach + Vô thanh hóa) và <strong>18% Ngữ điệu</strong>.
                 </p>
               </div>
               <div className="bg-gray-900/90 p-3 rounded-xl border border-gray-700">
-                <p className="font-bold text-purple-300 mb-0.5">📖 Cụm từ / Câu dài (L &ge; 6 từ)</p>
+                <p className="font-bold text-purple-300 mb-0.5">📖 Cụm từ / Câu dài (Độ dài hiệu dụng L &ge; 6)</p>
                 <p className="text-gray-400 text-[11px]">
                   Tự động ưu tiên <strong>73% Ngữ điệu &amp; Lưu loát</strong> (F0 Pitch DTW + Whisper) và <strong>27% Âm vị</strong>.
                 </p>
               </div>
             </div>
+            <p className="text-[10px] text-gray-500 italic">
+              * L (Độ dài hiệu dụng) được tính toán thông minh kết hợp giữa số từ và số âm tiết thực tế, tự động bù trọng số cho từ ghép tiếng Đức dài.
+            </p>
           </div>
 
           <div className="pt-2 flex items-center justify-end">

@@ -10,6 +10,9 @@ import AudioRecorder from '@/app/components/AudioRecorder';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
 import PhonemeKaraokeVisualizer from '@/app/components/PhonemeKaraokeVisualizer';
 import PhonemeDiagnosticCard, { CharScoreItem, WorstCharItem } from '@/app/components/PhonemeDiagnosticCard';
+import ErrorBoundary from '@/app/components/ErrorBoundary';
+import { startAiTimer, endAiTimer, captureAppError } from '@/app/lib/monitoring';
+import { track } from '@vercel/analytics';
 import { ArrowLeft, Sparkles, CheckCircle2, XCircle, RefreshCcw } from 'lucide-react';
 
 export default function FreeModePage() {
@@ -45,6 +48,7 @@ export default function FreeModePage() {
 
     setLoading(true);
     setResult(null);
+    const startTime = startAiTimer('free-mode-assess');
 
     try {
       const localAudioUrl = URL.createObjectURL(blob);
@@ -61,10 +65,20 @@ export default function FreeModePage() {
       });
 
       if (!res.ok) {
-        throw new Error('Lỗi khi chấm điểm từ máy chủ');
+        throw new Error(`Máy chủ trả về mã lỗi ${res.status}`);
       }
 
       const data = await res.json();
+      const durationMs = endAiTimer(word.trim(), startTime, 'free-mode-assess');
+      
+      // Theo dõi số liệu Custom Event trên Vercel Analytics
+      track('ai_assessment_completed', {
+        mode: 'free',
+        word: word.trim(),
+        duration_ms: durationMs,
+        is_passed: data.assessment?.is_passed ? 1 : 0,
+      });
+
       const assessment = data.assessment;
       const charScores: CharScoreItem[] = data.char_scores || [];
       const worstChar: WorstCharItem | undefined = assessment.worst_char_detail || (charScores.length > 0 ? charScores.reduce((min, c) => c.score < min.score ? c : min, charScores[0]) : undefined);
@@ -90,7 +104,7 @@ export default function FreeModePage() {
       }
 
     } catch (error: any) {
-      console.error(error);
+      captureAppError(error, { word: word.trim(), mode: 'free' });
       toastError(error.message || 'Có lỗi xảy ra khi chấm điểm.');
     } finally {
       setLoading(false);
@@ -119,133 +133,135 @@ export default function FreeModePage() {
           </div>
 
           {/* Form Card */}
-          <div className="bg-gray-800/90 border border-gray-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-            <div>
-              <label className="block text-gray-300 mb-2 font-bold text-sm">
-                {t('practice.word_to_practice')}
-              </label>
-              <input
-                type="text"
-                value={word}
-                onChange={(e) => setWord(e.target.value)}
-                placeholder={t('practice.word_placeholder')}
-                className="w-full bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400 text-lg font-bold transition-all font-mono"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <AudioRecorder onAudioReady={handleAudioReady} disabled={loading || !word.trim()} />
-            </div>
-
-            {loading && (
-              <div className="flex flex-col items-center justify-center p-8 space-y-3">
-                <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-lime-400"></div>
-                <p className="text-lime-400 text-sm font-medium animate-pulse">{t('common.processing')}</p>
+          <ErrorBoundary fallbackTitle="Lỗi trong quá trình luyện tập">
+            <div className="bg-gray-800/90 border border-gray-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+              <div>
+                <label className="block text-gray-300 mb-2 font-bold text-sm">
+                  {t('practice.word_to_practice')}
+                </label>
+                <input
+                  type="text"
+                  value={word}
+                  onChange={(e) => setWord(e.target.value)}
+                  placeholder={t('practice.word_placeholder')}
+                  className="w-full bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400 text-lg font-bold transition-all font-mono"
+                  disabled={loading}
+                />
               </div>
-            )}
 
-            {/* Assessment Result & AI Visualizer Suite */}
-            {result && !loading && (
-              <div className="space-y-6 pt-4 border-t border-gray-700/80 animate-in fade-in duration-300">
-                {/* Result Status Card */}
-                <div className={`p-6 rounded-3xl text-center border space-y-4 ${
-                  result.passed 
-                    ? 'bg-green-950/40 border-green-500/40 text-green-100 shadow-xl shadow-green-500/10' 
-                    : 'bg-red-950/40 border-red-500/40 text-red-100 shadow-xl shadow-red-500/10'
-                }`}>
-                  <div className="flex items-center justify-center gap-2">
-                    {result.passed ? (
-                      <CheckCircle2 className="w-10 h-10 text-green-400" />
-                    ) : (
-                      <XCircle className="w-10 h-10 text-red-400" />
+              <div>
+                <AudioRecorder onAudioReady={handleAudioReady} disabled={loading || !word.trim()} />
+              </div>
+
+              {loading && (
+                <div className="flex flex-col items-center justify-center p-8 space-y-3">
+                  <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-lime-400"></div>
+                  <p className="text-lime-400 text-sm font-medium animate-pulse">{t('common.processing')}</p>
+                </div>
+              )}
+
+              {/* Assessment Result & AI Visualizer Suite */}
+              {result && !loading && (
+                <div className="space-y-6 pt-4 border-t border-gray-700/80 animate-in fade-in duration-300">
+                  {/* Result Status Card */}
+                  <div className={`p-6 rounded-3xl text-center border space-y-4 ${
+                    result.passed 
+                      ? 'bg-green-950/40 border-green-500/40 text-green-100 shadow-xl shadow-green-500/10' 
+                      : 'bg-red-950/40 border-red-500/40 text-red-100 shadow-xl shadow-red-500/10'
+                  }`}>
+                    <div className="flex items-center justify-center gap-2">
+                      {result.passed ? (
+                        <CheckCircle2 className="w-10 h-10 text-green-400" />
+                      ) : (
+                        <XCircle className="w-10 h-10 text-red-400" />
+                      )}
+                      <h3 className={`text-2xl font-black ${result.passed ? 'text-green-400' : 'text-red-400'}`}>
+                        {result.passed ? t('practice.status_passed') : t('practice.status_failed')}
+                      </h3>
+                    </div>
+
+                    <p className="text-base font-medium text-gray-200">{result.feedback}</p>
+
+                    {/* Score Breakdown */}
+                    {result.scores && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-gray-700/60 text-xs">
+                        {result.scores.phoneme_score !== undefined && (
+                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
+                            <span className="text-gray-400 block">{t('practice.score_precise')}</span>
+                            <strong className="text-lime-400 text-sm font-bold">{(result.scores.phoneme_score * 100).toFixed(1)}%</strong>
+                          </div>
+                        )}
+                        {result.scores.dtw_score !== undefined && (
+                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
+                            <span className="text-gray-400 block">{t('practice.score_intonation')}</span>
+                            <strong className="text-blue-400 text-sm font-bold">{(result.scores.dtw_score * 100).toFixed(1)}%</strong>
+                          </div>
+                        )}
+                        {result.scores.whisper_score !== undefined && (
+                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
+                            <span className="text-gray-400 block">{t('practice.score_whisper')}</span>
+                            <strong className="text-purple-400 text-sm font-bold">{(result.scores.whisper_score * 100).toFixed(1)}%</strong>
+                          </div>
+                        )}
+                        {result.scores.total_score !== undefined && (
+                          <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
+                            <span className="text-gray-400 block">{t('practice.score_total')}</span>
+                            <strong className="text-yellow-400 text-sm font-bold">{(result.scores.total_score * 100).toFixed(1)}%</strong>
+                          </div>
+                        )}
+                      </div>
                     )}
-                    <h3 className={`text-2xl font-black ${result.passed ? 'text-green-400' : 'text-red-400'}`}>
-                      {result.passed ? t('practice.status_passed') : t('practice.status_failed')}
-                    </h3>
                   </div>
 
-                  <p className="text-base font-medium text-gray-200">{result.feedback}</p>
-
-                  {/* Score Breakdown */}
-                  {result.scores && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-gray-700/60 text-xs">
-                      {result.scores.phoneme_score !== undefined && (
-                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                          <span className="text-gray-400 block">{t('practice.score_precise')}</span>
-                          <strong className="text-lime-400 text-sm font-bold">{(result.scores.phoneme_score * 100).toFixed(1)}%</strong>
-                        </div>
-                      )}
-                      {result.scores.dtw_score !== undefined && (
-                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                          <span className="text-gray-400 block">{t('practice.score_intonation')}</span>
-                          <strong className="text-blue-400 text-sm font-bold">{(result.scores.dtw_score * 100).toFixed(1)}%</strong>
-                        </div>
-                      )}
-                      {result.scores.whisper_score !== undefined && (
-                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                          <span className="text-gray-400 block">{t('practice.score_whisper')}</span>
-                          <strong className="text-purple-400 text-sm font-bold">{(result.scores.whisper_score * 100).toFixed(1)}%</strong>
-                        </div>
-                      )}
-                      {result.scores.total_score !== undefined && (
-                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-                          <span className="text-gray-400 block">{t('practice.score_total')}</span>
-                          <strong className="text-yellow-400 text-sm font-bold">{(result.scores.total_score * 100).toFixed(1)}%</strong>
-                        </div>
-                      )}
-                    </div>
+                  {/* Dark Audio Player for Playback */}
+                  {result.audioUrl && (
+                    <DarkAudioPlayer
+                      audioUrl={result.audioUrl}
+                      onTimeUpdate={(cTime, dur) => {
+                        setKaraokeCurrentTime(cTime);
+                        setKaraokeDuration(dur);
+                        setIsKaraokePlaying(true);
+                      }}
+                      onEnded={() => {
+                        setIsKaraokePlaying(false);
+                        setKaraokeCurrentTime(0);
+                      }}
+                    />
                   )}
-                </div>
 
-                {/* Dark Audio Player for Playback */}
-                {result.audioUrl && (
-                  <DarkAudioPlayer
-                    audioUrl={result.audioUrl}
-                    onTimeUpdate={(cTime, dur) => {
-                      setKaraokeCurrentTime(cTime);
-                      setKaraokeDuration(dur);
-                      setIsKaraokePlaying(true);
-                    }}
-                    onEnded={() => {
-                      setIsKaraokePlaying(false);
-                      setKaraokeCurrentTime(0);
-                    }}
+                  {/* Karaoke Visualizer */}
+                  <PhonemeKaraokeVisualizer
+                    expectedWord={word}
+                    charScores={result.charScores}
+                    currentTime={karaokeCurrentTime}
+                    duration={karaokeDuration}
+                    isPlaying={isKaraokePlaying}
                   />
-                )}
 
-                {/* Karaoke Visualizer */}
-                <PhonemeKaraokeVisualizer
-                  expectedWord={word}
-                  charScores={result.charScores}
-                  currentTime={karaokeCurrentTime}
-                  duration={karaokeDuration}
-                  isPlaying={isKaraokePlaying}
-                />
+                  {/* Phoneme Diagnostic Card */}
+                  <PhonemeDiagnosticCard
+                    worstChar={result.worstChar}
+                    expectedWord={word}
+                    feedback={result.feedback}
+                    isPassed={result.passed}
+                  />
 
-                {/* Phoneme Diagnostic Card */}
-                <PhonemeDiagnosticCard
-                  worstChar={result.worstChar}
-                  expectedWord={word}
-                  feedback={result.feedback}
-                  isPassed={result.passed}
-                />
-
-                <div className="text-center pt-2">
-                  <button
-                    onClick={() => {
-                      setResult(null);
-                      setKaraokeCurrentTime(0);
-                    }}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl transition-colors cursor-pointer border border-gray-700"
-                  >
-                    <RefreshCcw className="w-4 h-4" />
-                    <span>{t('practice.try_again')}</span>
-                  </button>
+                  <div className="text-center pt-2">
+                    <button
+                      onClick={() => {
+                        setResult(null);
+                        setKaraokeCurrentTime(0);
+                      }}
+                      className="inline-flex items-center gap-2 px-6 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm rounded-xl transition-colors cursor-pointer border border-gray-700"
+                    >
+                      <RefreshCcw className="w-4 h-4" />
+                      <span>{t('practice.try_again')}</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </ErrorBoundary>
         </div>
       </main>
     </AuthGuard>

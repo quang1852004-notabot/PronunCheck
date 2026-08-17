@@ -5,6 +5,8 @@ import { AuthProvider } from "@/app/contexts/AuthContext";
 import { LanguageProvider } from "@/app/contexts/LanguageContext";
 import { ToastProvider } from "@/app/contexts/ToastContext";
 import Pwa from "@/app/Pwa";
+import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Analytics } from "@vercel/analytics/react";
 
 // Tat static prerendering - Firebase can browser APIs nen khong the chay server-side
 export const dynamic = "force-dynamic";
@@ -58,6 +60,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </ToastProvider>
           </AuthProvider>
         </LanguageProvider>
+        <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );
