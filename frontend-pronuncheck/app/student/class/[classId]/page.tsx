@@ -8,6 +8,10 @@ import { useAuth } from '@/app/contexts/AuthContext';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import AudioRecorder from '@/app/components/AudioRecorder';
+import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
+import PhonemeKaraokeVisualizer from '@/app/components/PhonemeKaraokeVisualizer';
+import PhonemeDiagnosticCard, { CharScoreItem, WorstCharItem } from '@/app/components/PhonemeDiagnosticCard';
+import StudentProgressChart from '@/app/components/StudentProgressChart';
 import { 
   getClass, 
   getAssignments, 
@@ -20,7 +24,7 @@ import {
   SubmissionData
 } from '@/app/lib/firestore';
 import { uploadAudio } from '@/app/lib/storage';
-import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Award } from 'lucide-react';
+import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Award, RefreshCcw, Sparkles } from 'lucide-react';
 
 export default function StudentClassPage({ params }: { params: Promise<{ classId: string }> }) {
   const { classId } = use(params);
@@ -45,7 +49,29 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
 
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
-  const [assessmentResult, setAssessmentResult] = useState<{ passed: boolean; feedback: string } | null>(null);
+
+  // Latest Assessment Result for Active Assignment
+  const [assessmentResult, setAssessmentResult] = useState<{
+    passed: boolean;
+    feedback: string;
+    charScores?: CharScoreItem[];
+    worstChar?: WorstCharItem;
+    audioUrl?: string;
+    scores?: {
+      phoneme_score?: number;
+      dtw_score?: number;
+      whisper_score?: number;
+      total_score?: number;
+    };
+  } | null>(null);
+
+  // Playback sync for Karaoke
+  const [karaokeCurrentTime, setKaraokeCurrentTime] = useState(0);
+  const [karaokeDuration, setKaraokeDuration] = useState(0);
+  const [isKaraokePlaying, setIsKaraokePlaying] = useState(false);
+
+  // Selected Submission from History
+  const [selectedHistorySub, setSelectedHistorySub] = useState<SubmissionData | null>(null);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -59,7 +85,6 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       }
       setClassData(data);
 
-      // Check if user is already a member or class is open
       const hasJoined = await isClassMember(classId, user.uid);
       const isPublic = !data.password;
 
@@ -126,6 +151,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     
     setSubmittingId(assignmentId);
     setAssessmentResult(null);
+    setSelectedHistorySub(null);
 
     try {
       const subs = await getSubmissionsByStudent(classId, user.uid, assignmentId);
@@ -168,6 +194,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
 
       const data = await res.json();
       const assessment = data.assessment;
+      const charScores: CharScoreItem[] = data.char_scores || [];
+      const worstChar: WorstCharItem | undefined = assessment.worst_char_detail || (charScores.length > 0 ? charScores.reduce((min, c) => c.score < min.score ? c : min, charScores[0]) : undefined);
 
       // 3. Save submission to Firestore
       const newSubmissionData: Omit<SubmissionData, 'id' | 'createdAt'> = {
@@ -185,6 +213,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
           whisper_score: assessment.whisper_score,
           total_score: assessment.total_score,
         },
+        charScores,
+        worstChar,
         feedback: assessment.feedback,
       };
 
@@ -193,6 +223,15 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       setAssessmentResult({
         passed: assessment.is_passed,
         feedback: assessment.feedback,
+        charScores,
+        worstChar,
+        audioUrl,
+        scores: {
+          phoneme_score: assessment.phoneme_score,
+          dtw_score: assessment.dtw_score,
+          whisper_score: assessment.whisper_score,
+          total_score: assessment.total_score,
+        }
       });
 
       if (assessment.is_passed) {
@@ -201,7 +240,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
         toastError('Chưa đạt. Hãy nghe lại và thử lại nhé!');
       }
 
-      // Reload assignments to refresh attempts count
+      // Reload assignments to refresh attempts count and history
       await loadData();
 
     } catch (err: any) {
@@ -295,7 +334,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
             </div>
           ) : (
             /* Member Mode: Render Assigned Exercises */
-            <div className="space-y-4">
+            <div className="space-y-6">
               <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
                 <BookOpen className="w-5 h-5 text-lime-400" />
                 {t('practice.assignments_to_do')} ({assignments.length})
@@ -306,7 +345,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                   {t('practice.no_assignments')}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {assignments.map((assignment) => {
                     const remainingAttempts = Math.max(0, assignment.maxAttempts - assignment.attemptsUsed);
                     const isDeadlinePassed = assignment.deadline ? new Date() > assignment.deadline.toDate() : false;
@@ -334,18 +373,29 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
 
                     const isOpen = activeAssignmentId === assignment.id;
 
+                    // Determine active data to show (either from selected history or latest assessment)
+                    const activeViewSub = selectedHistorySub?.assignmentId === assignment.id ? selectedHistorySub : null;
+                    const displayCharScores = activeViewSub?.charScores || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.charScores : undefined);
+                    const displayWorstChar = activeViewSub?.worstChar || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.worstChar : undefined);
+                    const displayFeedback = activeViewSub?.feedback || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.feedback : undefined);
+                    const displayAudioUrl = activeViewSub?.audioUrl || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.audioUrl : undefined);
+                    const displayIsPassed = activeViewSub ? activeViewSub.isPassed : (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.passed : assignment.isPassed);
+
                     return (
                       <div 
                         key={assignment.id} 
                         className={`bg-gray-800/90 rounded-3xl p-5 sm:p-6 border transition-all duration-200 ${
-                          isOpen ? 'border-lime-400/60 shadow-xl shadow-lime-500/5' : 'border-gray-700/80 hover:border-gray-600'
+                          isOpen ? 'border-lime-400/60 shadow-2xl shadow-lime-500/5' : 'border-gray-700/80 hover:border-gray-600'
                         }`}
                       >
                         <div 
                           className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer select-none"
                           onClick={() => {
                             setActiveAssignmentId(isOpen ? null : (assignment.id || null));
-                            if (!isOpen) setAssessmentResult(null);
+                            if (!isOpen) {
+                              setAssessmentResult(null);
+                              setSelectedHistorySub(null);
+                            }
                           }}
                         >
                           <div className="space-y-1">
@@ -380,9 +430,10 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                           </div>
                         </div>
 
-                        {/* Dropdown Recording Area */}
+                        {/* Dropdown Recording & History Area */}
                         {isOpen && (
-                          <div className="mt-6 pt-6 border-t border-gray-700/80 space-y-4 animate-in fade-in duration-200">
+                          <div className="mt-6 pt-6 border-t border-gray-700/80 space-y-6 animate-in fade-in duration-200">
+                            {/* Recording Form if still allowed */}
                             {!assignment.isActive ? (
                               <div className="p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-2xl text-sm font-medium">
                                 {t('practice.assignment_locked')}
@@ -395,13 +446,11 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                               <div className="p-4 bg-red-950/30 border border-red-500/30 text-red-400 rounded-2xl text-sm font-medium">
                                 {t('practice.max_attempts_reached')}
                               </div>
-                            ) : assignment.isPassed ? (
-                              <div className="p-4 bg-green-950/30 border border-green-500/30 text-green-400 rounded-2xl text-sm font-bold flex items-center gap-2">
-                                <Award className="w-5 h-5 text-yellow-400" />
-                                {t('practice.completed_congrats')}
-                              </div>
                             ) : (
-                              <div className="max-w-md">
+                              <div className="space-y-3">
+                                <h4 className="text-xs font-bold text-gray-300">
+                                  {assignment.isPassed ? 'Luyện tập thêm để nâng cao điểm số:' : 'Ghi âm nộp bài:'}
+                                </h4>
                                 <AudioRecorder 
                                   onAudioReady={(blob) => handleAudioReady(assignment.id!, assignment.word, assignment.targetPhoneme, blob)}
                                   disabled={submittingId === assignment.id}
@@ -410,54 +459,81 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                             )}
 
                             {submittingId === assignment.id && (
-                              <div className="flex items-center gap-3 text-lime-400 text-sm font-medium animate-pulse py-2">
+                              <div className="flex items-center gap-3 text-lime-400 text-sm font-medium animate-pulse py-4 justify-center bg-gray-900/60 rounded-2xl border border-gray-800">
                                 <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-lime-400"></div>
-                                {t('common.processing')}
+                                <span>Đang phân tích âm vị AI (Wav2Vec2, FastDTW, Whisper)...</span>
                               </div>
                             )}
 
-                            {assessmentResult && !submittingId && (
-                              <div className={`p-5 rounded-2xl border text-center space-y-2 ${
-                                assessmentResult.passed 
-                                  ? 'bg-green-950/40 border-green-500/40 text-green-100' 
-                                  : 'bg-red-950/40 border-red-500/40 text-red-100'
-                              }`}>
-                                <h4 className="text-xl font-bold">
-                                  {assessmentResult.passed ? `✅ ${t('practice.status_passed')}` : `❌ ${t('practice.status_failed')}`}
-                                </h4>
-                                <p className="text-sm">{assessmentResult.feedback}</p>
-                              </div>
-                            )}
-
-                            {/* Submissions History */}
-                            {assignment.submissions && assignment.submissions.length > 0 && (
-                              <div className="space-y-2 pt-3 border-t border-gray-700/60">
-                                <h4 className="text-xs font-bold text-gray-400">Lịch sử bài nộp ({assignment.submissions.length}):</h4>
-                                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-xs">
-                                  {assignment.submissions.map((sub, idx) => (
-                                    <div 
-                                      key={sub.id || idx} 
-                                      className="flex items-center justify-between p-2.5 bg-gray-900/60 rounded-xl border border-gray-700/60"
+                            {/* Karaoke Visualizer & AI Diagnostics for Active View */}
+                            {(displayCharScores || displayWorstChar || displayFeedback) && !submittingId && (
+                              <div className="space-y-5 pt-2 border-t border-gray-700/80 animate-in fade-in duration-300">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                                    <Sparkles className="w-4 h-4 text-lime-400" />
+                                    <span>
+                                      {activeViewSub 
+                                        ? `Đang xem lại Lần thử #${activeViewSub.attemptNumber}` 
+                                        : 'Kết quả Đánh giá Vừa Nộp:'}
+                                    </span>
+                                  </h4>
+                                  {activeViewSub && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedHistorySub(null)}
+                                      className="text-xs text-lime-400 hover:underline flex items-center gap-1 cursor-pointer"
                                     >
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-mono text-gray-400">#{sub.attemptNumber || idx + 1}</span>
-                                        <span className={sub.isPassed ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
-                                          {sub.isPassed ? t('practice.status_passed') : t('practice.status_failed')}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-3">
-                                        {sub.scores?.total_score !== undefined && (
-                                          <span className="text-gray-300 font-bold">
-                                            {(sub.scores.total_score * 100).toFixed(1)}%
-                                          </span>
-                                        )}
-                                        {sub.audioUrl && (
-                                          <audio src={sub.audioUrl} controls className="h-7 w-36 sm:w-44" />
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))}
+                                      <RefreshCcw className="w-3 h-3" /> Xem kết quả mới nhất
+                                    </button>
+                                  )}
                                 </div>
+
+                                {/* Custom Dark Mode Audio Player for Playback & Karaoke Sync */}
+                                {displayAudioUrl && (
+                                  <DarkAudioPlayer
+                                    audioUrl={displayAudioUrl}
+                                    onTimeUpdate={(cTime, dur) => {
+                                      setKaraokeCurrentTime(cTime);
+                                      setKaraokeDuration(dur);
+                                      setIsKaraokePlaying(true);
+                                    }}
+                                    onEnded={() => {
+                                      setIsKaraokePlaying(false);
+                                      setKaraokeCurrentTime(0);
+                                    }}
+                                  />
+                                )}
+
+                                {/* Karaoke Visualizer Synchronized with Player */}
+                                <PhonemeKaraokeVisualizer
+                                  expectedWord={assignment.word}
+                                  charScores={displayCharScores}
+                                  currentTime={karaokeCurrentTime}
+                                  duration={karaokeDuration}
+                                  isPlaying={isKaraokePlaying}
+                                />
+
+                                {/* AI Phonetic Diagnostics Card */}
+                                <PhonemeDiagnosticCard
+                                  worstChar={displayWorstChar}
+                                  expectedWord={assignment.word}
+                                  feedback={displayFeedback}
+                                  isPassed={displayIsPassed}
+                                />
+                              </div>
+                            )}
+
+                            {/* Student Progress History Timeline & Mini Chart */}
+                            {assignment.submissions && assignment.submissions.length > 0 && (
+                              <div className="pt-4 border-t border-gray-700/80">
+                                <StudentProgressChart
+                                  submissions={assignment.submissions}
+                                  selectedSubmissionId={selectedHistorySub?.id}
+                                  onSelectSubmission={(sub) => {
+                                    setSelectedHistorySub(sub);
+                                    setKaraokeCurrentTime(0);
+                                  }}
+                                />
                               </div>
                             )}
                           </div>

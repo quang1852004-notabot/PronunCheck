@@ -60,8 +60,30 @@ export interface SubmissionData {
   studentEmail: string;
   assignmentId: string;
   word: string;
-  audioStoragePath: string;
-  detailedScore: DetailedScore;
+  targetPhoneme?: string;
+  audioUrl?: string;
+  audioStoragePath?: string;
+  detailedScore?: DetailedScore;
+  scores?: {
+    phoneme_score?: number;
+    dtw_score?: number;
+    whisper_score?: number;
+    total_score?: number;
+  };
+  charScores?: {
+    char: string;
+    score: number;
+    actual: string;
+    duration_frames?: number;
+    duration_multiplier?: number;
+    duration_feedback?: string | null;
+  }[];
+  worstChar?: {
+    char: string;
+    score: number;
+    actual: string;
+  };
+  feedback?: string;
   isPassed: boolean;
   attemptNumber: number;
   createdAt?: any;

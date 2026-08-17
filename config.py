@@ -93,3 +93,11 @@ UPLOAD_DIR = "temp_audio"
 REFERENCE_AUDIO_DIR = "reference_audio"
 MAX_FILE_SIZE_MB = 10
 ALLOWED_EXTENSIONS = {"wav", "webm", "mp3", "ogg"}
+
+
+# ==============================================================================
+# 7. CẤU HÌNH SENTRY MONITORING & REAL-TIME ERROR TRACKING
+# ==============================================================================
+SENTRY_DSN = os.getenv("SENTRY_BACKEND_DSN", "")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.2"))

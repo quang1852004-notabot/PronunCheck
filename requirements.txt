@@ -10,3 +10,4 @@ fastdtw
 google-cloud-texttospeech
 gTTS
 soundfile
+sentry-sdk[fastapi]>=2.0.0

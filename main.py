@@ -25,9 +25,28 @@ from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import traceback
 
+# Import Sentry SDK cho Giám sát lỗi Backend thời gian thực
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
+
 # Import cấu hình và module chấm điểm từ package Light_ScoringBackend
 import config
 from Light_ScoringBackend import scoring, german_phonetics
+
+# Khởi tạo Sentry SDK nếu SENTRY_DSN được định nghĩa
+if config.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=config.SENTRY_DSN,
+        environment=config.ENVIRONMENT,
+        integrations=[
+            FastApiIntegration(),
+            StarletteIntegration(),
+        ],
+        traces_sample_rate=config.SENTRY_TRACES_SAMPLE_RATE,
+        send_default_pii=True,  # Bật full dump theo yêu cầu của người dùng để debug tối đa
+    )
+    print(f"Sentry Backend SDK initialized (Env: {config.ENVIRONMENT}).", flush=True)
 
 # Thư viện mô hình AI
 from faster_whisper import WhisperModel
@@ -175,6 +194,18 @@ def assess_pronunciation(
         # 2. Giải mã âm thanh thành mảng float32 16kHz
         audio_array = decode_audio(file_path, sampling_rate=16000)
 
+        # Ghi nhận Sentry Breadcrumb cho lượt chấm điểm AI
+        sentry_sdk.add_breadcrumb(
+            category="ai_scoring",
+            message=f"Starting AI pronunciation assessment for word: '{expected_word}'",
+            level="info",
+            data={
+                "word": expected_word,
+                "audio_samples": len(audio_array),
+                "duration_sec": round(len(audio_array) / 16000, 2)
+            }
+        )
+
         # 3. Gửi 3 luồng phân tích song song vào Executor
         future_precise = executor.submit(
             scoring.analyze_precise_score,
@@ -215,6 +246,13 @@ def assess_pronunciation(
     except Exception as e:
         err_msg = traceback.format_exc()
         print("API Error:", err_msg, flush=True)
+        # Gửi sự kiện lỗi tức thì lên Sentry để kích hoạt Mobile Alert
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("endpoint", "/api/v1/assess")
+            scope.set_tag("expected_word", expected_word)
+            scope.set_extra("traceback", err_msg)
+            sentry_sdk.capture_exception(e)
+            
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
         
     finally:
