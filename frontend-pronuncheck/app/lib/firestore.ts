@@ -53,6 +53,11 @@ export interface AssignmentData {
   isPassed?: boolean;
   remainingAttempts?: number;
   submissions?: SubmissionData[];
+  scoringConfig?: ScoringConfig;
+  enableSampleAudio?: boolean;
+  sampleAudioType?: 'tts' | 'teacher_record';
+  sampleAudioUrl?: string;
+  sampleAudioStoragePath?: string;
   createdAt?: any;
 }
 

@@ -27,7 +27,8 @@ import {
   SubmissionData
 } from '@/app/lib/firestore';
 import { uploadAudio } from '@/app/lib/storage';
-import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Award, RefreshCcw, Sparkles } from 'lucide-react';
+import { getGoogleTtsUrl } from '@/app/lib/tts';
+import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Award, RefreshCcw, Sparkles, Volume2 } from 'lucide-react';
 
 export default function StudentClassPage({ params }: { params: Promise<{ classId: string }> }) {
   const { classId } = use(params);
@@ -182,12 +183,24 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       formData.append('expected_word', expectedWord);
       formData.append('target_phoneme', targetPhoneme);
 
-      if (classData.scoringConfig) {
-        if (classData.scoringConfig.passing_threshold) {
-          formData.append('passing_threshold', classData.scoringConfig.passing_threshold.toString());
+      // Prioritize Assignment-level scoring config over Class-level scoring config
+      const effectiveConfig = assignment?.scoringConfig || classData.scoringConfig;
+      if (effectiveConfig) {
+        const thresholdVal = effectiveConfig.threshold ?? effectiveConfig.passing_threshold;
+        if (thresholdVal !== undefined) {
+          formData.append('passing_threshold', thresholdVal.toString());
         }
-        if (classData.scoringConfig.weights) {
-          formData.append('weights', JSON.stringify(classData.scoringConfig.weights));
+        if (effectiveConfig.mode) {
+          formData.append('mode', effectiveConfig.mode);
+        }
+        if (effectiveConfig.L0 !== undefined) {
+          formData.append('L0', effectiveConfig.L0.toString());
+        }
+        if (effectiveConfig.k !== undefined) {
+          formData.append('k', effectiveConfig.k.toString());
+        }
+        if (effectiveConfig.weights) {
+          formData.append('weights', JSON.stringify(effectiveConfig.weights));
         }
       }
 
@@ -468,6 +481,26 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                           {/* Dropdown Recording & History Area */}
                           {isOpen && (
                             <div className="mt-6 pt-6 border-t border-gray-700/80 space-y-6 animate-in fade-in duration-200">
+                              {/* Reference Sample Audio Player (if enabled) */}
+                              {assignment.enableSampleAudio && (
+                                <div className="p-4 bg-emerald-950/30 rounded-2xl border border-emerald-500/30 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5 uppercase tracking-wide">
+                                      <Volume2 className="w-4 h-4 text-emerald-400" />
+                                      {assignment.sampleAudioType === 'teacher_record' 
+                                        ? '🎧 Phát âm mẫu của Giáo viên:' 
+                                        : '🎧 Phát âm mẫu chuẩn Google TTS (de-DE):'}
+                                    </span>
+                                    <span className="text-[11px] text-gray-400 hidden sm:inline">
+                                      Nghe và luyện theo trước khi thu âm
+                                    </span>
+                                  </div>
+                                  <DarkAudioPlayer 
+                                    audioUrl={assignment.sampleAudioUrl || getGoogleTtsUrl(assignment.word)} 
+                                  />
+                                </div>
+                              )}
+
                               {isDeadlinePassed ? (
                                 <p className="text-sm text-red-400 font-bold text-center py-2">{t('practice.deadline_passed')}</p>
                               ) : isMaxAttemptsReached ? (

@@ -16,12 +16,25 @@ import {
   SubmissionData 
 } from '@/app/lib/firestore';
 import { useRouter } from 'next/navigation';
-import AssignmentForm from '@/app/teacher/components/AssignmentForm';
-import EditAssignmentModal from '@/app/teacher/components/EditAssignmentModal';
 import ScoringConfigComponent from '@/app/teacher/components/ScoringConfig';
 import SubmissionTable from '@/app/teacher/components/SubmissionTable';
 import ClassManagement from '@/app/teacher/components/ClassManagement';
-import { Edit2, Trash2, ArrowLeft, Copy, Check, Power, AlertTriangle, BookOpen, Sliders, Table2, Settings } from 'lucide-react';
+import AssignmentModal from '@/app/teacher/components/AssignmentModal';
+import { 
+  Edit2, 
+  Trash2, 
+  ArrowLeft, 
+  Copy, 
+  Check, 
+  Power, 
+  AlertTriangle, 
+  BookOpen, 
+  Sliders, 
+  Table2, 
+  Settings,
+  PlusCircle,
+  Volume2
+} from 'lucide-react';
 
 export default function ClassDetail({ params }: { params: Promise<{ classId: string }> }) {
   const { classId } = use(params);
@@ -36,8 +49,9 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
   const [activeTab, setActiveTab] = useState<'assignments' | 'config' | 'submissions' | 'management'>('assignments');
   const [copied, setCopied] = useState(false);
 
-  // Edit & Delete states
-  const [editingAssignment, setEditingAssignment] = useState<AssignmentData | null>(null);
+  // Assignment Modal & Delete states
+  const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
+  const [selectedAssignment, setSelectedAssignment] = useState<AssignmentData | null>(null);
   const [deletingAssignment, setDeletingAssignment] = useState<AssignmentData | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -214,21 +228,53 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
 
           {/* Tab 1: Assignments */}
           <div className={activeTab === 'assignments' ? 'space-y-6 animate-in fade-in duration-200' : 'hidden'}>
-            <AssignmentForm classId={classId} onCreated={loadData} />
+            <div className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 shadow-xl border border-gray-700/80 space-y-5">
+              {/* Header with Title & + Create New Assignment Button */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-700/60">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-blue-400" />
+                    <span>{t('tab.assignments')} ({assignments.length})</span>
+                  </h2>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Danh sách các bài tập phát âm đang mở cho học viên trong lớp
+                  </p>
+                </div>
 
-            <div className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 shadow-xl border border-gray-700/80">
-              <h2 className="text-lg font-bold text-white mb-4">
-                {t('tab.assignments')} ({assignments.length})
-              </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAssignment(null);
+                    setIsAssignmentModalOpen(true);
+                  }}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl text-xs sm:text-sm transition-all shadow-lg shadow-blue-500/25 flex items-center gap-2 cursor-pointer active:scale-95 shrink-0 self-start sm:self-auto"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>{t('assignment.btn_create')}</span>
+                </button>
+              </div>
 
               {loading ? (
-                <div className="flex justify-center p-8">
+                <div className="flex justify-center p-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-400"></div>
                 </div>
               ) : assignments.length === 0 ? (
-                <p className="text-gray-500 text-center py-8 text-sm">
-                  {t('practice.no_assignments')}
-                </p>
+                <div className="text-center py-12 space-y-3">
+                  <p className="text-gray-400 text-sm">
+                    {t('practice.no_assignments')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAssignment(null);
+                      setIsAssignmentModalOpen(true);
+                    }}
+                    className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>{t('assignment.btn_create')}</span>
+                  </button>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {assignments.map((assignment) => (
@@ -271,14 +317,25 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400 mt-3">
-                          <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                          <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700 font-sans">
                             Phoneme: <strong className="text-white font-mono">{assignment.targetPhoneme}</strong>
                           </span>
-                          <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                          <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700 font-sans">
                             Tối đa: <strong className="text-white">{assignment.maxAttempts} lượt</strong>
                           </span>
+                          {assignment.enableSampleAudio && (
+                            <span className="bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
+                              <Volume2 className="w-3 h-3" />
+                              <span>{assignment.sampleAudioType === 'teacher_record' ? 'Audio GV' : 'Audio TTS'}</span>
+                            </span>
+                          )}
+                          {assignment.scoringConfig && (
+                            <span className="bg-purple-950/40 text-purple-300 border border-purple-500/30 px-2 py-1 rounded-lg font-bold">
+                              ⚙️ Config riêng
+                            </span>
+                          )}
                           {assignment.deadline && (
-                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700">
+                            <span className="bg-gray-800 px-2 py-1 rounded-lg border border-gray-700 font-sans">
                               Hạn: {assignment.deadline.toDate().toLocaleDateString('vi-VN')}
                             </span>
                           )}
@@ -301,7 +358,10 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
                         </button>
 
                         <button
-                          onClick={() => setEditingAssignment(assignment)}
+                          onClick={() => {
+                            setSelectedAssignment(assignment);
+                            setIsAssignmentModalOpen(true);
+                          }}
                           className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
                           title={t('common.edit')}
                         >
@@ -360,13 +420,17 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
           </div>
         </div>
 
-        {/* Edit Assignment Modal */}
-        <EditAssignmentModal
+        {/* Unified Create & Edit Assignment Modal (Dual Tabs) */}
+        <AssignmentModal
           classId={classId}
-          assignment={editingAssignment}
-          isOpen={!!editingAssignment}
-          onClose={() => setEditingAssignment(null)}
-          onUpdated={loadData}
+          assignment={selectedAssignment}
+          classDefaultConfig={classData?.scoringConfig}
+          isOpen={isAssignmentModalOpen}
+          onClose={() => {
+            setIsAssignmentModalOpen(false);
+            setSelectedAssignment(null);
+          }}
+          onSaved={loadData}
         />
 
         {/* Delete Confirmation Modal with Dual Options */}
