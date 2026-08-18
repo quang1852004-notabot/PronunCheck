@@ -92,7 +92,20 @@ export default function AssignmentModal({
   const [L0, setL0] = useState<number>(4.5);
   const [k, setK] = useState<number>(0.85);
 
-  const [loading, setLoading] = useState(false);
+  // Calculate effective word length for this assignment
+  const wordCount = word.trim() ? word.trim().split(/\s+/).length : 1;
+  const assignmentL = wordCount <= 1 ? 1.5 : wordCount <= 3 ? 3.5 : Math.min(10, Number((wordCount * 1.1).toFixed(1)));
+  const [simL, setSimL] = useState<number>(assignmentL);
+
+  // Sync simL if word changes
+  useEffect(() => {
+    setSimL(assignmentL);
+  }, [word]);
+
+  // Calculate simulated weights for currently selected simL
+  const expSim = Math.max(-20, Math.min(20, k * (simL - L0)));
+  const simW_acc = Math.round((1 / (1 + Math.exp(expSim))) * 100);
+  const simW_flu = 100 - simW_acc;
 
   // Populate form on open / mode change
   useEffect(() => {
@@ -549,9 +562,194 @@ export default function AssignmentModal({
                   </div>
                 </div>
 
-                {/* Custom Scoring Sliders */}
+                {/* Custom Scoring Sliders & Details */}
                 <div className={`space-y-4 transition-opacity ${useCustomScoring ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
-                  {/* Passing Threshold Slider */}
+                  {/* Mode Buttons */}
+                  <div className="flex items-center justify-between p-4 bg-gray-950/80 rounded-2xl border border-gray-800">
+                    <span className="text-xs font-bold text-gray-200">Chế độ phân bổ trọng số:</span>
+                    <div className="flex items-center gap-1.5 p-1 bg-gray-900 rounded-xl border border-gray-800">
+                      <button
+                        type="button"
+                        onClick={() => setScoringMode('auto')}
+                        className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          scoringMode === 'auto'
+                            ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        <span>{t('config.mode_auto')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setScoringMode('manual')}
+                        className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          scoringMode === 'manual'
+                            ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        <Sliders className="w-3.5 h-3.5" />
+                        <span>{t('config.mode_manual')}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mode 1: Auto Card */}
+                  {scoringMode === 'auto' && (
+                    <div className="p-4 bg-blue-950/30 border border-blue-500/30 rounded-2xl space-y-3">
+                      <div className="flex items-center gap-2 text-blue-400 font-bold text-xs">
+                        <Sparkles className="w-4 h-4" />
+                        <span>{t('config.auto_title')}</span>
+                      </div>
+                      <p className="text-xs text-gray-300 leading-relaxed">
+                        {t('config.auto_desc')}
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-blue-500/20">
+                          <span className="text-xs font-bold text-blue-300 block">{t('config.auto_short_label')}</span>
+                          <span className="text-[10px] text-gray-400">{t('config.auto_short_desc')}</span>
+                        </div>
+                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-blue-500/20">
+                          <span className="text-xs font-bold text-blue-300 block">{t('config.auto_med_label')}</span>
+                          <span className="text-[10px] text-gray-400">{t('config.auto_med_desc')}</span>
+                        </div>
+                        <div className="bg-gray-900/80 p-2.5 rounded-xl border border-blue-500/20">
+                          <span className="text-xs font-bold text-blue-300 block">{t('config.auto_long_label')}</span>
+                          <span className="text-[10px] text-gray-400">{t('config.auto_long_desc')}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mode 2: Manual Interactive SVG Graph & Controls */}
+                  {scoringMode === 'manual' && (
+                    <div className="space-y-4">
+                      {/* SVG Graph with highlightL */}
+                      <DynamicScoringGraph
+                        L0={L0}
+                        k={k}
+                        threshold={threshold}
+                        highlightL={simL}
+                      />
+
+                      {/* Parameter Sliders */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-gray-950/90 p-4 rounded-2xl border border-purple-500/30">
+                        {/* Slider 1: L0 */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center text-xs">
+                            <label className="font-bold text-gray-200">{t('config.l0_label')}</label>
+                            <span className="font-mono font-black text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md">
+                              L0 = {L0.toFixed(1)}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="2.0"
+                            max="10.0"
+                            step="0.5"
+                            value={L0}
+                            onChange={(e) => setL0(parseFloat(e.target.value))}
+                            className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                          />
+                          <div className="flex justify-between text-[10px] text-gray-500">
+                            <span>2.0 (Từ rất ngắn)</span>
+                            <span>4.5 (Mặc định)</span>
+                            <span>10.0 (Câu rất dài)</span>
+                          </div>
+                        </div>
+
+                        {/* Slider 2: k */}
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center text-xs">
+                            <label className="font-bold text-gray-200">{t('config.k_label')}</label>
+                            <span className="font-mono font-black text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md">
+                              k = {k.toFixed(2)}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.3"
+                            max="2.0"
+                            step="0.05"
+                            value={k}
+                            onChange={(e) => setK(parseFloat(e.target.value))}
+                            className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                          />
+                          <div className="flex justify-between text-[10px] text-gray-500">
+                            <span>0.3 (Chuyển đổi êm)</span>
+                            <span>0.85 (Chuẩn)</span>
+                            <span>2.0 (Đột ngột)</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Quick Live Simulation Sandbox Buttons */}
+                      <div className="p-4 bg-gray-950/80 rounded-2xl border border-gray-800 space-y-3">
+                        <span className="text-xs font-bold text-gray-300 block">{t('config.sim_title')}</span>
+                        <div className="flex flex-wrap gap-2">
+                          {word.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => setSimL(assignmentL)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                                simL === assignmentL 
+                                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-500/20' 
+                                  : 'bg-gray-800 text-emerald-400 border-emerald-500/40 hover:text-white'
+                              }`}
+                            >
+                              🎯 Bài này: {word.length > 15 ? `${word.slice(0, 15)}...` : word} (L≈{assignmentL})
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setSimL(1.5)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              simL === 1.5 
+                                ? 'bg-blue-600/30 text-blue-300 border-blue-500' 
+                                : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-white'
+                            }`}
+                          >
+                            {t('config.sim_short')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSimL(4.5)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              simL === 4.5 
+                                ? 'bg-blue-600/30 text-blue-300 border-blue-500' 
+                                : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-white'
+                            }`}
+                          >
+                            {t('config.sim_medium')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSimL(8.0)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              simL === 8.0 
+                                ? 'bg-blue-600/30 text-blue-300 border-blue-500' 
+                                : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-white'
+                            }`}
+                          >
+                            {t('config.sim_long')}
+                          </button>
+                        </div>
+
+                        {/* Simulation Result Output */}
+                        <div className="p-3 bg-gray-900 rounded-xl border border-gray-800 flex items-center justify-between text-xs font-mono">
+                          <span className="text-gray-400">Kết quả phân bổ trọng số:</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-green-400 font-bold">Âm vị: {simW_acc}%</span>
+                            <span className="text-purple-400 font-bold">Ngữ điệu: {simW_flu}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Passing Threshold Setting */}
                   <div className="p-4 bg-gray-950/80 rounded-2xl border border-gray-800 space-y-2">
                     <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-gray-200">{t('config.threshold')}</span>
@@ -569,76 +767,6 @@ export default function AssignmentModal({
                       className="w-full accent-yellow-400 cursor-pointer h-2 bg-gray-800 rounded-lg"
                     />
                     <p className="text-[11px] text-gray-500">{t('config.threshold_hint')}</p>
-                  </div>
-
-                  {/* Mode switcher & manual parameters */}
-                  <div className="p-4 bg-gray-950/80 rounded-2xl border border-gray-800 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-200">Chế độ phân bổ trọng số:</span>
-                      <div className="flex items-center gap-1.5 p-1 bg-gray-900 rounded-xl border border-gray-800">
-                        <button
-                          type="button"
-                          onClick={() => setScoringMode('auto')}
-                          className={`px-3 py-1 text-xs font-bold rounded-lg cursor-pointer ${
-                            scoringMode === 'auto' ? 'bg-blue-600 text-white' : 'text-gray-400'
-                          }`}
-                        >
-                          Tự động
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setScoringMode('manual')}
-                          className={`px-3 py-1 text-xs font-bold rounded-lg cursor-pointer ${
-                            scoringMode === 'manual' ? 'bg-purple-600 text-white' : 'text-gray-400'
-                          }`}
-                        >
-                          Thủ công
-                        </button>
-                      </div>
-                    </div>
-
-                    {scoringMode === 'manual' && (
-                      <div className="space-y-3 pt-2 border-t border-gray-800">
-                        {/* L0 Slider */}
-                        <div className="space-y-1">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="text-gray-300">Điểm chuyển tiếp L0:</span>
-                            <strong className="font-mono text-blue-400">{L0} từ</strong>
-                          </div>
-                          <input
-                            type="range"
-                            min={2.0}
-                            max={8.0}
-                            step={0.5}
-                            value={L0}
-                            onChange={e => setL0(parseFloat(e.target.value))}
-                            className="w-full accent-blue-500 cursor-pointer h-1.5 bg-gray-800 rounded-lg"
-                          />
-                        </div>
-
-                        {/* k Slider */}
-                        <div className="space-y-1">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="text-gray-300">Độ dốc chuyển đổi k:</span>
-                            <strong className="font-mono text-purple-400">{k}</strong>
-                          </div>
-                          <input
-                            type="range"
-                            min={0.3}
-                            max={2.0}
-                            step={0.05}
-                            value={k}
-                            onChange={e => setK(parseFloat(e.target.value))}
-                            className="w-full accent-purple-500 cursor-pointer h-1.5 bg-gray-800 rounded-lg"
-                          />
-                        </div>
-
-                        {/* Dynamic SVG Graph */}
-                        <div className="pt-2">
-                          <DynamicScoringGraph L0={L0} k={k} threshold={threshold} />
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>

@@ -6,6 +6,8 @@ import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import AudioLevelMeter from '@/app/components/AudioLevelMeter';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
+import NoiseReductionSlider from '@/app/components/NoiseReductionSlider';
+import { createRnnoiseNode } from '@/app/lib/rnnoise';
 
 interface AudioRecorderProps {
   onAudioReady: (blob: Blob) => void;
@@ -24,12 +26,30 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
+  // Noise Reduction Level (0: Off, 1: Low (Default), 2: Medium, 3: High, 4: Extreme)
+  const [noiseLevel, setNoiseLevel] = useState<number>(1);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load initial noise level from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('pronuncheck_noise_level');
+        if (saved !== null) {
+          const parsed = Number(saved);
+          if (parsed >= 0 && parsed <= 4) {
+            setNoiseLevel(parsed);
+          }
+        }
+      } catch (_) {}
+    }
+  }, []);
 
   // Recording Timer
   useEffect(() => {
@@ -96,6 +116,41 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
     }
   };
 
+  // Build WebRTC constraints according to noiseLevel
+  const getMediaConstraints = (lvl: number): MediaStreamConstraints => {
+    if (lvl === 0) {
+      return {
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        }
+      };
+    }
+
+    if (lvl === 1) {
+      return {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+          channelCount: 1,
+        }
+      };
+    }
+
+    // Levels 2, 3, 4
+    return {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      }
+    };
+  };
+
   // Pre-flight Mic Check
   const togglePreview = async () => {
     if (isPreviewing) {
@@ -104,14 +159,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        }
-      });
+      const stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints(noiseLevel));
       setPreviewStream(stream);
       setIsPreviewing(true);
     } catch (err) {
@@ -122,48 +170,78 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
   const startRecording = async () => {
     try {
-      // 1. Kích hoạt stream với WebRTC Audio DSP Constraints chuẩn
+      // 1. Kích hoạt stream theo đúng mức độ khử ồn đã chọn
       let stream = previewStream;
       if (!stream || !stream.active) {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-          }
-        });
+        stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints(noiseLevel));
       }
       
       streamRef.current = stream;
       setActiveStream(stream);
       stopPreviewStream(); // Tắt preview độc lập để chuyển sang ghi âm
 
-      // 2. Web Audio API Transparent Pipeline (High-Pass 80Hz nhẹ nhàng, loại bỏ Compressor gây méo tiếng)
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audioCtx = new AudioCtx();
-      audioContextRef.current = audioCtx;
+      let recordStream = stream;
 
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume();
+      // 2. Thiết lập Web Audio DSP Graph theo 5 nấc khử ồn
+      if (noiseLevel > 0) {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        audioContextRef.current = audioCtx;
+
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+
+        const sourceNode = audioCtx.createMediaStreamSource(stream);
+        const destination = audioCtx.createMediaStreamDestination();
+
+        // Cấu hình tần số cắt High-Pass Filter theo nấc
+        const highPassCutoff = noiseLevel === 1 ? 60 : noiseLevel === 2 ? 80 : 100;
+        const highPassQ = noiseLevel >= 3 ? 0.707 : 0.5;
+
+        const highPassFilter = audioCtx.createBiquadFilter();
+        highPassFilter.type = 'highpass';
+        highPassFilter.frequency.value = highPassCutoff;
+        highPassFilter.Q.value = highPassQ;
+
+        if (noiseLevel === 1 || noiseLevel === 2) {
+          // Nấc 1 & 2: Transparent High-Pass
+          sourceNode.connect(highPassFilter);
+          highPassFilter.connect(destination);
+        } else if (noiseLevel === 3) {
+          // Nấc 3: High-Pass + RNNoise AI Worklet (nếu hỗ trợ)
+          const rnnoiseNode = await createRnnoiseNode(audioCtx);
+          if (rnnoiseNode) {
+            sourceNode.connect(rnnoiseNode);
+            rnnoiseNode.connect(highPassFilter);
+          } else {
+            sourceNode.connect(highPassFilter);
+          }
+          highPassFilter.connect(destination);
+        } else if (noiseLevel === 4) {
+          // Nấc 4 (Cực đoan): High-Pass + RNNoise AI + Dynamics Compressor
+          const rnnoiseNode = await createRnnoiseNode(audioCtx);
+          const compressor = audioCtx.createDynamicsCompressor();
+          compressor.threshold.value = -18;
+          compressor.knee.value = 20;
+          compressor.ratio.value = 4;
+          compressor.attack.value = 0.003;
+          compressor.release.value = 0.15;
+
+          if (rnnoiseNode) {
+            sourceNode.connect(rnnoiseNode);
+            rnnoiseNode.connect(highPassFilter);
+          } else {
+            sourceNode.connect(highPassFilter);
+          }
+          highPassFilter.connect(compressor);
+          compressor.connect(destination);
+        }
+
+        if (destination.stream && destination.stream.getAudioTracks().length > 0) {
+          recordStream = destination.stream;
+        }
       }
-
-      const sourceNode = audioCtx.createMediaStreamSource(stream);
-
-      // High-Pass Filter 80Hz: Cắt rung quạt / ù điện lưới mà bảo toàn 100% độ ấm & tự nhiên của giọng nói
-      const highPassFilter = audioCtx.createBiquadFilter();
-      highPassFilter.type = 'highpass';
-      highPassFilter.frequency.value = 80;
-      highPassFilter.Q.value = 0.5; // Bộ lọc Q nhẹ, không gây méo pha
-
-      const destination = audioCtx.createMediaStreamDestination();
-      sourceNode.connect(highPassFilter);
-      highPassFilter.connect(destination);
-
-      // Sử dụng stream đã lọc ù gió để ghi âm
-      const recordStream = destination.stream && destination.stream.getAudioTracks().length > 0
-        ? destination.stream
-        : stream;
 
       // Xác định định dạng ghi âm chất lượng cao (128kbps)
       let options: MediaRecorderOptions = {};
@@ -255,52 +333,61 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
 
       {/* 2. Initial Buttons */}
       {!isRecording && !recordedBlob && (
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
-          <button
-            type="button"
-            onClick={startRecording}
-            disabled={disabled}
-            className={`flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl font-bold text-white shadow-xl transition-all cursor-pointer ${
-              disabled
-                ? 'bg-gray-700 cursor-not-allowed opacity-50'
-                : 'bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 active:scale-95 shadow-red-500/25'
-            }`}
-          >
-            <Mic className="w-5 h-5 animate-pulse" />
-            <span>{t('recorder.start')}</span>
-          </button>
-
-          {/* Nút Kiểm tra Micro trước (Pre-flight Test) */}
-          <button
-            type="button"
-            onClick={togglePreview}
-            disabled={disabled}
-            className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-semibold transition-all cursor-pointer border text-xs sm:text-sm ${
-              isPreviewing
-                ? 'bg-cyan-950 text-cyan-400 border-cyan-700 shadow-cyan-500/20'
-                : 'bg-gray-800 hover:bg-gray-750 text-gray-300 border-gray-700 hover:border-gray-600'
-            }`}
-          >
-            <Activity className={`w-4 h-4 ${isPreviewing ? 'animate-spin text-cyan-400' : 'text-cyan-400'}`} />
-            <span>{isPreviewing ? 'Dừng kiểm tra' : 'Kiểm tra Micro'}</span>
-          </button>
-
-          <span className="text-gray-500 font-medium text-xs hidden sm:inline">•</span>
-
-          <label className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-semibold text-white shadow-md transition-all cursor-pointer text-xs sm:text-sm ${
-            disabled ? 'bg-gray-700 cursor-not-allowed opacity-50' : 'bg-gray-800 hover:bg-gray-750 border border-gray-700 active:scale-95'
-          }`}>
-            <Upload className="w-4 h-4 text-blue-400" />
-            <span>{t('recorder.upload_file')}</span>
-            <input 
-              type="file" 
-              accept="audio/*" 
-              className="hidden" 
-              onChange={handleFileUpload} 
+        <div className="flex flex-col items-center gap-4 w-full">
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full justify-center">
+            <button
+              type="button"
+              onClick={startRecording}
               disabled={disabled}
-              ref={fileInputRef}
-            />
-          </label>
+              className={`flex items-center justify-center gap-2 px-7 py-3.5 rounded-2xl font-bold text-white shadow-xl transition-all cursor-pointer ${
+                disabled
+                  ? 'bg-gray-700 cursor-not-allowed opacity-50'
+                  : 'bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 active:scale-95 shadow-red-500/25'
+              }`}
+            >
+              <Mic className="w-5 h-5 animate-pulse" />
+              <span>{t('recorder.start')}</span>
+            </button>
+
+            {/* Nút Kiểm tra Micro trước (Pre-flight Test) */}
+            <button
+              type="button"
+              onClick={togglePreview}
+              disabled={disabled}
+              className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-semibold transition-all cursor-pointer border text-xs sm:text-sm ${
+                isPreviewing
+                  ? 'bg-cyan-950 text-cyan-400 border-cyan-700 shadow-cyan-500/20'
+                  : 'bg-gray-800 hover:bg-gray-750 text-gray-300 border-gray-700 hover:border-gray-600'
+              }`}
+            >
+              <Activity className={`w-4 h-4 ${isPreviewing ? 'animate-spin text-cyan-400' : 'text-cyan-400'}`} />
+              <span>{isPreviewing ? 'Dừng kiểm tra' : 'Kiểm tra Micro'}</span>
+            </button>
+
+            <span className="text-gray-500 font-medium text-xs hidden sm:inline">•</span>
+
+            <label className={`flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-semibold text-white shadow-md transition-all cursor-pointer text-xs sm:text-sm ${
+              disabled ? 'bg-gray-700 cursor-not-allowed opacity-50' : 'bg-gray-800 hover:bg-gray-750 border border-gray-700 active:scale-95'
+            }`}>
+              <Upload className="w-4 h-4 text-blue-400" />
+              <span>{t('recorder.upload_file')}</span>
+              <input 
+                type="file" 
+                accept="audio/*" 
+                className="hidden" 
+                onChange={handleFileUpload} 
+                disabled={disabled}
+                ref={fileInputRef}
+              />
+            </label>
+          </div>
+
+          {/* Thanh trượt 5 nấc khử ồn tùy chỉnh */}
+          <NoiseReductionSlider
+            value={noiseLevel}
+            onChange={(lvl) => setNoiseLevel(lvl)}
+            disabled={disabled}
+          />
         </div>
       )}
 
@@ -314,9 +401,9 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
               <span>{t('recorder.recording')}</span>
             </div>
 
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-lime-400 bg-lime-950/60 border border-lime-800/60 px-2.5 py-1 rounded-full">
-              <Sparkles className="w-3 h-3 text-lime-400" />
-              <span>Khử ồn tự nhiên: Bật</span>
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2.5 py-1 rounded-full">
+              <Sparkles className="w-3 h-3 text-cyan-400" />
+              <span>Khử ồn Mức {noiseLevel}</span>
             </div>
 
             <div className="flex items-center gap-1.5 font-mono text-base font-extrabold text-white bg-gray-950 px-3.5 py-1 rounded-full border border-gray-800 shadow-inner">

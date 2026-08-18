@@ -6,6 +6,8 @@ import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import AudioLevelMeter from '@/app/components/AudioLevelMeter';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
+import NoiseReductionSlider from '@/app/components/NoiseReductionSlider';
+import { createRnnoiseNode } from '@/app/lib/rnnoise';
 
 interface TeacherRecordSampleModalProps {
   isOpen: boolean;
@@ -29,10 +31,29 @@ export default function TeacherRecordSampleModal({
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
+  // Noise Reduction Level (0: Off, 1: Low (Default), 2: Medium, 3: High, 4: Extreme)
+  const [noiseLevel, setNoiseLevel] = useState<number>(1);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load saved noise level on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('pronuncheck_noise_level');
+        if (saved !== null) {
+          const parsed = Number(saved);
+          if (parsed >= 0 && parsed <= 4) {
+            setNoiseLevel(parsed);
+          }
+        }
+      } catch (_) {}
+    }
+  }, []);
 
   // Timer
   useEffect(() => {
@@ -60,6 +81,7 @@ export default function TeacherRecordSampleModal({
       setRecordedBlob(null);
       setAudioUrl(null);
       setIsRecording(false);
+      setRecordingSeconds(0);
     }
   }, [isOpen]);
 
@@ -68,7 +90,46 @@ export default function TeacherRecordSampleModal({
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
     setActiveStream(null);
+  };
+
+  // Build WebRTC constraints according to noiseLevel
+  const getMediaConstraints = (lvl: number): MediaStreamConstraints => {
+    if (lvl === 0) {
+      return {
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        }
+      };
+    }
+
+    if (lvl === 1) {
+      return {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+          channelCount: 1,
+        }
+      };
+    }
+
+    // Levels 2, 3, 4
+    return {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      }
+    };
   };
 
   const startRecording = async () => {
@@ -77,18 +138,68 @@ export default function TeacherRecordSampleModal({
       setAudioUrl(null);
       audioChunksRef.current = [];
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-
+      const stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints(noiseLevel));
       streamRef.current = stream;
       setActiveStream(stream);
+
+      let recordStream = stream;
+
+      // Web Audio DSP Graph theo 5 nấc khử ồn
+      if (noiseLevel > 0) {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const audioCtx = new AudioCtx();
+        audioContextRef.current = audioCtx;
+
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+
+        const sourceNode = audioCtx.createMediaStreamSource(stream);
+        const destination = audioCtx.createMediaStreamDestination();
+
+        const highPassCutoff = noiseLevel === 1 ? 60 : noiseLevel === 2 ? 80 : 100;
+        const highPassQ = noiseLevel >= 3 ? 0.707 : 0.5;
+
+        const highPassFilter = audioCtx.createBiquadFilter();
+        highPassFilter.type = 'highpass';
+        highPassFilter.frequency.value = highPassCutoff;
+        highPassFilter.Q.value = highPassQ;
+
+        if (noiseLevel === 1 || noiseLevel === 2) {
+          sourceNode.connect(highPassFilter);
+          highPassFilter.connect(destination);
+        } else if (noiseLevel === 3) {
+          const rnnoiseNode = await createRnnoiseNode(audioCtx);
+          if (rnnoiseNode) {
+            sourceNode.connect(rnnoiseNode);
+            rnnoiseNode.connect(highPassFilter);
+          } else {
+            sourceNode.connect(highPassFilter);
+          }
+          highPassFilter.connect(destination);
+        } else if (noiseLevel === 4) {
+          const rnnoiseNode = await createRnnoiseNode(audioCtx);
+          const compressor = audioCtx.createDynamicsCompressor();
+          compressor.threshold.value = -18;
+          compressor.knee.value = 20;
+          compressor.ratio.value = 4;
+          compressor.attack.value = 0.003;
+          compressor.release.value = 0.15;
+
+          if (rnnoiseNode) {
+            sourceNode.connect(rnnoiseNode);
+            rnnoiseNode.connect(highPassFilter);
+          } else {
+            sourceNode.connect(highPassFilter);
+          }
+          highPassFilter.connect(compressor);
+          compressor.connect(destination);
+        }
+
+        if (destination.stream && destination.stream.getAudioTracks().length > 0) {
+          recordStream = destination.stream;
+        }
+      }
 
       // Choose mime type
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -97,7 +208,7 @@ export default function TeacherRecordSampleModal({
         ? 'audio/webm'
         : 'audio/mp4';
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mediaRecorder = new MediaRecorder(recordStream, { mimeType, audioBitsPerSecond: 128000 });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -183,6 +294,14 @@ export default function TeacherRecordSampleModal({
           </p>
         </div>
 
+        {/* Noise Reduction Slider */}
+        {!isRecording && !recordedBlob && (
+          <NoiseReductionSlider
+            value={noiseLevel}
+            onChange={(lvl) => setNoiseLevel(lvl)}
+          />
+        )}
+
         {/* Recording State & Meter */}
         <div className="space-y-4">
           {/* Audio Level Meter while recording */}
@@ -191,7 +310,7 @@ export default function TeacherRecordSampleModal({
               <div className="flex items-center justify-between text-xs text-gray-400">
                 <span className="flex items-center gap-1.5 text-lime-400 font-bold">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
-                  Đang ghi âm giọng giáo viên...
+                  Đang ghi âm giọng giáo viên (Mức {noiseLevel})...
                 </span>
                 <span className="font-mono text-white font-bold flex items-center gap-1">
                   <Timer className="w-3.5 h-3.5 text-lime-400" />
