@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { SubmissionData, AssignmentData, ClassData } from '@/app/lib/firestore';
+import { 
+  SubmissionData, 
+  AssignmentData, 
+  ClassData,
+  updateSubmissionNote,
+  deleteSubmission
+} from '@/app/lib/firestore';
 import { getAudioUrl } from '@/app/lib/storage';
 import { exportClassDataToExcel } from '@/app/lib/excelExport';
 import { useLanguage } from '@/app/contexts/LanguageContext';
@@ -14,22 +20,27 @@ import {
   Search, 
   RotateCcw, 
   Volume2, 
-  Pause,
-  Play,
-  Loader2,
   X, 
   CheckCircle2, 
   XCircle,
-  Calendar,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ChevronDown,
+  Edit3,
+  Trash2,
+  MessageSquare,
+  AlertTriangle,
+  Save
 } from 'lucide-react';
 
 import StudentAnalyticsDashboard from '@/app/teacher/components/StudentAnalyticsDashboard';
+import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
+import PhonemeKaraokeVisualizer from '@/app/components/PhonemeKaraokeVisualizer';
 
 interface SubmissionTableProps {
   submissions: SubmissionData[];
   assignments: AssignmentData[];
   classData?: ClassData | null;
+  onSubmissionUpdated?: () => void;
 }
 
 type SortField = 'email' | 'word' | 'time' | 'attempt' | 'wav2vec' | 'dtw' | 'whisper' | 'total' | 'result';
@@ -61,9 +72,67 @@ function getSubmissionTimestamp(sub: SubmissionData): number {
   return 0;
 }
 
-export default function SubmissionTable({ submissions, assignments, classData }: SubmissionTableProps) {
+export default function SubmissionTable({ 
+  submissions, 
+  assignments, 
+  classData,
+  onSubmissionUpdated
+}: SubmissionTableProps) {
   const { t } = useLanguage();
   const { success, error: toastError } = useToast();
+
+  // Expanded Row State (Accordion)
+  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
+
+  // Playback sync for Karaoke
+  const [karaokeCurrentTime, setKaraokeCurrentTime] = useState(0);
+  const [karaokeDuration, setKaraokeDuration] = useState(0);
+  const [isKaraokePlaying, setIsKaraokePlaying] = useState(false);
+
+  // Manage Action Popover & Modals
+  const [managePopoverSubId, setManagePopoverSubId] = useState<string | null>(null);
+  const [editingNoteSub, setEditingNoteSub] = useState<SubmissionData | null>(null);
+  const [noteText, setNoteText] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+
+  const [deletingSub, setDeletingSub] = useState<SubmissionData | null>(null);
+  const [deletingSubLoading, setDeletingSubLoading] = useState(false);
+
+  // Sorting State - Default sort by 'time' descending
+  const [sortField, setSortField] = useState<SortField | null>('time');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Filter States
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [emailSearchQuery, setEmailSearchQuery] = useState('');
+  
+  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>([]);
+  const [assignmentSearchQuery, setAssignmentSearchQuery] = useState('');
+  
+  const [selectedStatuses, setSelectedStatuses] = useState<('passed' | 'failed')[]>([]);
+
+  // Active Filter Popover Menu: 'email' | 'assignment' | 'status' | null
+  const [activePopover, setActivePopover] = useState<'email' | 'assignment' | 'status' | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Click outside to close popovers
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+        setActivePopover(null);
+        setManagePopoverSubId(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // When opening note modal, prepopulate current note
+  useEffect(() => {
+    if (editingNoteSub) {
+      setNoteText(editingNoteSub.teacherNote || '');
+    }
+  }, [editingNoteSub]);
 
   // Handle Export Excel
   const handleExportExcel = () => {
@@ -81,48 +150,41 @@ export default function SubmissionTable({ submissions, assignments, classData }:
     }
   };
 
-  // Audio Playback State
-  const [playingSubId, setPlayingSubId] = useState<string | null>(null);
-  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
-  const audioInstanceRef = useRef<HTMLAudioElement | null>(null);
-
-  // Sorting State - Default sort by 'time' descending
-  const [sortField, setSortField] = useState<SortField | null>('time');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-
-  // Filter States
-  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
-  const [emailSearchQuery, setEmailSearchQuery] = useState('');
-  
-  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>([]);
-  const [assignmentSearchQuery, setAssignmentSearchQuery] = useState('');
-  
-  const [selectedStatuses, setSelectedStatuses] = useState<('passed' | 'failed')[]>([]);
-
-  // Active Popover Menu: 'email' | 'assignment' | 'status' | null
-  const [activePopover, setActivePopover] = useState<'email' | 'assignment' | 'status' | null>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-
-  // Click outside to close popover
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-        setActivePopover(null);
-      }
+  // Handle Save Teacher Note
+  const handleSaveNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNoteSub?.id || !classData?.id) return;
+    setSavingNote(true);
+    try {
+      await updateSubmissionNote(classData.id, editingNoteSub.id, noteText);
+      success(t('sub.note_saved'));
+      setEditingNoteSub(null);
+      if (onSubmissionUpdated) onSubmissionUpdated();
+    } catch (err: any) {
+      console.error(err);
+      toastError(err.message || 'Lỗi khi lưu ghi chú');
+    } finally {
+      setSavingNote(false);
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  };
 
-  // Stop audio on unmount
-  useEffect(() => {
-    return () => {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause();
-        audioInstanceRef.current = null;
-      }
-    };
-  }, []);
+  // Handle Delete Submission
+  const handleConfirmDeleteSubmission = async () => {
+    if (!deletingSub?.id || !classData?.id) return;
+    setDeletingSubLoading(true);
+    try {
+      await deleteSubmission(classData.id, deletingSub.id);
+      success(t('sub.sub_deleted'));
+      if (expandedSubId === deletingSub.id) setExpandedSubId(null);
+      setDeletingSub(null);
+      if (onSubmissionUpdated) onSubmissionUpdated();
+    } catch (err: any) {
+      console.error(err);
+      toastError(err.message || 'Lỗi khi xóa bài nộp');
+    } finally {
+      setDeletingSubLoading(false);
+    }
+  };
 
   // Map assignmentId -> AssignmentData for quick lookup
   const assignmentMap = useMemo(() => {
@@ -159,24 +221,18 @@ export default function SubmissionTable({ submissions, assignments, classData }:
   // Filter submissions
   const filteredSubmissions = useMemo(() => {
     return submissions.filter(sub => {
-      // 1. Filter by Email
       if (selectedEmails.length > 0 && !selectedEmails.includes(sub.studentEmail)) {
         return false;
       }
-
-      // 2. Filter by Assignment
       if (selectedAssignmentIds.length > 0 && !selectedAssignmentIds.includes(sub.assignmentId)) {
         return false;
       }
-
-      // 3. Filter by Status (Passed / Failed)
       if (selectedStatuses.length > 0) {
-        const isPassed = sub.isPassed;
-        const matchesStatus = (selectedStatuses.includes('passed') && isPassed) ||
-                              (selectedStatuses.includes('failed') && !isPassed);
-        if (!matchesStatus) return false;
+        const status = sub.isPassed ? 'passed' : 'failed';
+        if (!selectedStatuses.includes(status)) {
+          return false;
+        }
       }
-
       return true;
     });
   }, [submissions, selectedEmails, selectedAssignmentIds, selectedStatuses]);
@@ -201,13 +257,10 @@ export default function SubmissionTable({ submissions, assignments, classData }:
           bVal = bTitle.toLowerCase();
           break;
         }
-        case 'time': {
-          const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0);
-          const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0);
-          aVal = aTime;
-          bVal = bTime;
+        case 'time':
+          aVal = getSubmissionTimestamp(a);
+          bVal = getSubmissionTimestamp(b);
           break;
-        }
         case 'attempt':
           aVal = a.attemptNumber || 1;
           bVal = b.attemptNumber || 1;
@@ -239,64 +292,6 @@ export default function SubmissionTable({ submissions, assignments, classData }:
       return 0;
     });
   }, [filteredSubmissions, sortField, sortDirection, assignmentMap]);
-
-  // Unified audio player function supporting both URL and Storage Path
-  const handlePlayAudio = async (sub: SubmissionData) => {
-    const subId = sub.id || `${sub.assignmentId}_${sub.studentId}_${sub.attemptNumber}`;
-
-    // If already playing this audio, pause it
-    if (playingSubId === subId) {
-      if (audioInstanceRef.current) {
-        audioInstanceRef.current.pause();
-        audioInstanceRef.current = null;
-      }
-      setPlayingSubId(null);
-      return;
-    }
-
-    // Stop current audio if playing another
-    if (audioInstanceRef.current) {
-      audioInstanceRef.current.pause();
-      audioInstanceRef.current = null;
-    }
-
-    const audioPathOrUrl = sub.audioUrl || sub.audioStoragePath || (sub as any).audioPath;
-    if (!audioPathOrUrl) {
-      toastError(t('sub.play_error'));
-      return;
-    }
-
-    setLoadingAudioId(subId);
-
-    try {
-      const url = await getAudioUrl(audioPathOrUrl);
-      if (!url) throw new Error('No audio URL found');
-
-      const audio = new Audio(url);
-      audioInstanceRef.current = audio;
-
-      audio.onended = () => {
-        setPlayingSubId(null);
-        audioInstanceRef.current = null;
-      };
-
-      audio.onerror = () => {
-        toastError(t('sub.play_error'));
-        setPlayingSubId(null);
-        setLoadingAudioId(null);
-        audioInstanceRef.current = null;
-      };
-
-      await audio.play();
-      setPlayingSubId(subId);
-    } catch (error) {
-      console.error('Play audio error:', error);
-      toastError(t('sub.play_error'));
-      setPlayingSubId(null);
-    } finally {
-      setLoadingAudioId(null);
-    }
-  };
 
   const hasActiveFilters = selectedEmails.length > 0 || selectedAssignmentIds.length > 0 || selectedStatuses.length > 0 || sortField !== 'time';
 
@@ -387,17 +382,20 @@ export default function SubmissionTable({ submissions, assignments, classData }:
         )}
       </div>
 
-      {/* Table Container - Overflow Horizontal Protected */}
+      {/* Table Container */}
       <div className="relative overflow-x-auto rounded-3xl border border-gray-700/80 shadow-2xl bg-gray-900/50 w-full max-w-full">
         <table className="w-full text-xs sm:text-sm text-left text-gray-300">
           <thead className="text-[11px] sm:text-xs text-gray-300 uppercase bg-gray-900/95 border-b border-gray-700 select-none whitespace-nowrap">
             <tr>
+              {/* Col 0: Expand Chevron */}
+              <th scope="col" className="w-8 px-2 py-4 text-center"></th>
+
               {/* Col 1: Email */}
-              <th scope="col" className="px-5 py-4 min-w-[200px]">
-                <div className="flex items-center justify-between gap-2">
+              <th scope="col" className="px-4 py-4 min-w-[180px]">
+                <div className="flex items-center gap-2">
                   <button 
                     onClick={() => handleSort('email')}
-                    className="flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
+                    className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
                   >
                     <span>{t('sub.th_email')}</span>
                     {renderSortIcon('email')}
@@ -429,46 +427,27 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                             className="bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none w-full"
                           />
                         </div>
-                        <div className="flex justify-between text-[11px] text-blue-400 pb-1.5 border-b border-gray-700 mb-1.5 font-medium">
-                          <button 
-                            onClick={() => setSelectedEmails(uniqueEmails)}
-                            className="hover:underline cursor-pointer"
-                          >
-                            {t('sub.select_all')}
-                          </button>
-                          <button 
-                            onClick={() => setSelectedEmails([])}
-                            className="hover:underline cursor-pointer"
-                          >
-                            {t('sub.deselect_all')}
-                          </button>
-                        </div>
-                        <div className="max-h-48 overflow-y-auto space-y-1">
+
+                        <div className="max-h-48 overflow-y-auto space-y-1 scrollbar-thin">
                           {uniqueEmails
-                            .filter(email => email.toLowerCase().includes(emailSearchQuery.toLowerCase()))
-                            .map((email) => {
-                              const isChecked = selectedEmails.includes(email);
-                              return (
-                                <label 
-                                  key={email}
-                                  className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs text-gray-200"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setSelectedEmails([...selectedEmails, email]);
-                                      } else {
-                                        setSelectedEmails(selectedEmails.filter(e => e !== email));
-                                      }
-                                    }}
-                                    className="rounded bg-gray-900 border-gray-600 text-blue-600 focus:ring-0"
-                                  />
-                                  <span className="truncate">{email}</span>
-                                </label>
-                              );
-                            })}
+                            .filter(e => e.toLowerCase().includes(emailSearchQuery.toLowerCase()))
+                            .map(email => (
+                              <label key={email} className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedEmails.includes(email)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedEmails([...selectedEmails, email]);
+                                    } else {
+                                      setSelectedEmails(selectedEmails.filter(x => x !== email));
+                                    }
+                                  }}
+                                  className="rounded bg-gray-900 border-gray-600 text-blue-600 focus:ring-0"
+                                />
+                                <span className="truncate text-gray-300 font-mono">{email}</span>
+                              </label>
+                            ))}
                         </div>
                       </div>
                     )}
@@ -477,11 +456,11 @@ export default function SubmissionTable({ submissions, assignments, classData }:
               </th>
 
               {/* Col 2: Assignment / Word */}
-              <th scope="col" className="px-5 py-4 min-w-[220px]">
-                <div className="flex items-center justify-between gap-2">
+              <th scope="col" className="px-4 py-4 min-w-[180px]">
+                <div className="flex items-center gap-2">
                   <button 
                     onClick={() => handleSort('word')}
-                    className="flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
+                    className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
                   >
                     <span>{t('sub.th_word')}</span>
                     {renderSortIcon('word')}
@@ -513,53 +492,30 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                             className="bg-transparent text-xs text-white placeholder-gray-500 focus:outline-none w-full"
                           />
                         </div>
-                        <div className="flex justify-between text-[11px] text-purple-400 pb-1.5 border-b border-gray-700 mb-1.5 font-medium">
-                          <button 
-                            onClick={() => setSelectedAssignmentIds(assignments.map(a => a.id!).filter(Boolean))}
-                            className="hover:underline cursor-pointer"
-                          >
-                            {t('sub.select_all')}
-                          </button>
-                          <button 
-                            onClick={() => setSelectedAssignmentIds([])}
-                            className="hover:underline cursor-pointer"
-                          >
-                            {t('sub.deselect_all')}
-                          </button>
-                        </div>
-                        <div className="max-h-48 overflow-y-auto space-y-1">
+
+                        <div className="max-h-48 overflow-y-auto space-y-1 scrollbar-thin">
                           {assignments
-                            .filter(a => {
-                              const matchTitle = a.title && a.title.toLowerCase().includes(assignmentSearchQuery.toLowerCase());
-                              const matchWord = a.word && a.word.toLowerCase().includes(assignmentSearchQuery.toLowerCase());
-                              return matchTitle || matchWord;
-                            })
-                            .map((a) => {
-                              const isChecked = selectedAssignmentIds.includes(a.id!);
-                              return (
-                                <label 
-                                  key={a.id}
-                                  className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs text-gray-200"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setSelectedAssignmentIds([...selectedAssignmentIds, a.id!]);
-                                      } else {
-                                        setSelectedAssignmentIds(selectedAssignmentIds.filter(id => id !== a.id));
-                                      }
-                                    }}
-                                    className="rounded bg-gray-900 border-gray-600 text-purple-600 focus:ring-0"
-                                  />
-                                  <div className="truncate">
-                                    {a.title && <span className="font-bold block">{a.title}</span>}
-                                    <span className="font-mono text-gray-400">{a.word}</span>
-                                  </div>
-                                </label>
-                              );
-                            })}
+                            .filter(a => (a.title || a.word).toLowerCase().includes(assignmentSearchQuery.toLowerCase()))
+                            .map(a => (
+                              <label key={a.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-700 rounded-lg cursor-pointer text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={a.id ? selectedAssignmentIds.includes(a.id) : false}
+                                  onChange={(e) => {
+                                    if (!a.id) return;
+                                    if (e.target.checked) {
+                                      setSelectedAssignmentIds([...selectedAssignmentIds, a.id]);
+                                    } else {
+                                      setSelectedAssignmentIds(selectedAssignmentIds.filter(x => x !== a.id));
+                                    }
+                                  }}
+                                  className="rounded bg-gray-900 border-gray-600 text-purple-600 focus:ring-0"
+                                />
+                                <span className="truncate text-gray-300 font-medium">
+                                  {a.title ? `${a.title} (${a.word})` : a.word}
+                                </span>
+                              </label>
+                            ))}
                         </div>
                       </div>
                     )}
@@ -567,20 +523,19 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                 </div>
               </th>
 
-              {/* Col 3: Time of Submission */}
-              <th scope="col" className="px-4 py-4 text-center min-w-[140px]">
+              {/* Col 3: Submitted At */}
+              <th scope="col" className="px-3 py-4 text-center whitespace-nowrap">
                 <button 
                   onClick={() => handleSort('time')}
                   className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
                 >
-                  <Calendar className="w-3.5 h-3.5 text-gray-400" />
                   <span>{t('sub.th_time')}</span>
                   {renderSortIcon('time')}
                 </button>
               </th>
 
               {/* Col 4: Attempt */}
-              <th scope="col" className="px-4 py-4 text-center">
+              <th scope="col" className="px-3 py-4 text-center">
                 <button 
                   onClick={() => handleSort('attempt')}
                   className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer"
@@ -590,44 +545,44 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                 </button>
               </th>
 
-              {/* Col 5: Phonetics */}
-              <th scope="col" className="px-4 py-4 text-center">
+              {/* Col 5: Phonetics (Clean White Text) */}
+              <th scope="col" className="px-3 py-4 text-center">
                 <button 
                   onClick={() => handleSort('wav2vec')}
-                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-blue-400"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-gray-200"
                 >
                   <span>{t('sub.th_phoneme')}</span>
                   {renderSortIcon('wav2vec')}
                 </button>
               </th>
 
-              {/* Col 6: Intonation */}
-              <th scope="col" className="px-4 py-4 text-center">
+              {/* Col 6: Intonation (Clean White Text) */}
+              <th scope="col" className="px-3 py-4 text-center">
                 <button 
                   onClick={() => handleSort('dtw')}
-                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-purple-400"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-gray-200"
                 >
                   <span>{t('sub.th_intonation')}</span>
                   {renderSortIcon('dtw')}
                 </button>
               </th>
 
-              {/* Col 7: Completeness */}
-              <th scope="col" className="px-4 py-4 text-center">
+              {/* Col 7: Completeness (Clean White Text) */}
+              <th scope="col" className="px-3 py-4 text-center">
                 <button 
                   onClick={() => handleSort('whisper')}
-                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-pink-400"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-gray-200"
                 >
                   <span>{t('sub.th_whisper')}</span>
                   {renderSortIcon('whisper')}
                 </button>
               </th>
 
-              {/* Col 8: Overall Score */}
-              <th scope="col" className="px-4 py-4 text-center">
+              {/* Col 8: Overall Score (White in header) */}
+              <th scope="col" className="px-3 py-4 text-center">
                 <button 
                   onClick={() => handleSort('total')}
-                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-lime-400"
+                  className="inline-flex items-center gap-1.5 font-bold hover:text-white group cursor-pointer text-gray-200"
                 >
                   <span>{t('sub.th_total')}</span>
                   {renderSortIcon('total')}
@@ -635,7 +590,7 @@ export default function SubmissionTable({ submissions, assignments, classData }:
               </th>
 
               {/* Col 9: Result Filter */}
-              <th scope="col" className="px-5 py-4 text-center min-w-[130px]">
+              <th scope="col" className="px-3.5 py-4 text-center min-w-[120px]">
                 <div className="flex items-center justify-center gap-2">
                   <button 
                     onClick={() => handleSort('result')}
@@ -699,9 +654,9 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                 </div>
               </th>
 
-              {/* Col 10: Listen Audio */}
-              <th scope="col" className="px-4 py-4 text-center">
-                {t('sub.th_listen')}
+              {/* Col 10: Manage Actions */}
+              <th scope="col" className="px-3 py-4 text-center">
+                {t('sub.th_manage')}
               </th>
             </tr>
           </thead>
@@ -709,7 +664,7 @@ export default function SubmissionTable({ submissions, assignments, classData }:
           <tbody className="divide-y divide-gray-800">
             {sortedSubmissions.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-6 py-12 text-center text-gray-500 font-medium">
+                <td colSpan={11} className="px-6 py-12 text-center text-gray-500 font-medium">
                   {submissions.length === 0 ? t('sub.no_submissions') : t('sub.no_filter_match')}
                 </td>
               </tr>
@@ -717,6 +672,7 @@ export default function SubmissionTable({ submissions, assignments, classData }:
               sortedSubmissions.map((sub, idx) => {
                 const subId = sub.id || `${sub.assignmentId}_${sub.studentId}_${sub.attemptNumber || idx}`;
                 const assignment = assignmentMap.get(sub.assignmentId);
+                const isExpanded = expandedSubId === subId;
 
                 // Clean Integer Scores [0 - 100]
                 const rawTotal = sub.detailedScore?.hybrid_target_score !== undefined
@@ -739,10 +695,6 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                   : (sub.detailedScore?.whisper_raw_score !== undefined ? sub.detailedScore.whisper_raw_score : 0);
                 const whisperScore = normalizeScore(rawWhisper);
 
-                const isAudioPlaying = playingSubId === subId;
-                const isAudioLoading = loadingAudioId === subId;
-                const hasAudio = Boolean(sub.audioUrl || sub.audioStoragePath || (sub as any).audioPath);
-
                 // Format timestamp with fallback to audio filename timestamp
                 let formattedTime = '-';
                 if (sub.createdAt?.toDate) {
@@ -761,113 +713,340 @@ export default function SubmissionTable({ submissions, assignments, classData }:
                 }
 
                 return (
-                  <tr 
-                    key={subId} 
-                    className="hover:bg-gray-800/40 transition-colors border-b border-gray-800/60"
-                  >
-                    {/* 1. Student Email */}
-                    <td className="px-3.5 py-3 font-mono font-medium text-gray-200 truncate max-w-[200px]" title={sub.studentEmail}>
-                      {sub.studentEmail}
-                    </td>
-
-                    {/* 2. Assignment / Word */}
-                    <td className="px-3.5 py-3 max-w-[220px]">
-                      {assignment?.title ? (
-                        <div>
-                          <p className="font-bold text-white truncate text-xs sm:text-sm font-sans" title={assignment.title}>
-                            {assignment.title}
-                          </p>
-                          <p className="font-sans text-gray-400 text-xs truncate" title={sub.word}>
-                            {sub.word}
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="font-sans text-white font-medium truncate text-xs sm:text-sm" title={sub.word}>
-                          {sub.word}
-                        </p>
-                      )}
-                    </td>
-
-                    {/* 3. Submitted At (Date & Time) */}
-                    <td className="px-3 py-3 text-center font-mono text-[11px] text-gray-400 whitespace-nowrap">
-                      {formattedTime}
-                    </td>
-
-                    {/* 4. Attempt */}
-                    <td className="px-3 py-3 text-center font-mono text-xs text-gray-400">
-                      {sub.attemptNumber ? `${sub.attemptNumber} / ${assignment?.maxAttempts || 3}` : '1'}
-                    </td>
-
-                    {/* 5. Phoneme Score */}
-                    <td className="px-3 py-3 text-center font-mono font-bold text-blue-400 whitespace-nowrap text-xs sm:text-sm">
-                      {phonemeScore}
-                    </td>
-
-                    {/* 6. DTW Score */}
-                    <td className="px-3 py-3 text-center font-mono text-purple-400 whitespace-nowrap text-xs sm:text-sm">
-                      {dtwScore}
-                    </td>
-
-                    {/* 7. Whisper Score */}
-                    <td className="px-3 py-3 text-center font-mono text-pink-400 whitespace-nowrap text-xs sm:text-sm">
-                      {whisperScore}
-                    </td>
-
-                    {/* 8. Total Score */}
-                    <td className="px-3 py-3 text-center font-mono font-black text-lime-400 whitespace-nowrap text-sm sm:text-base">
-                      {totalScore}
-                    </td>
-
-                    {/* 9. Result Status */}
-                    <td className="px-3.5 py-3 text-center whitespace-nowrap">
-                      {sub.isPassed ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 whitespace-nowrap">
-                          <CheckCircle2 className="w-3 h-3 shrink-0" />
-                          <span>{t('practice.status_passed')}</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-500/15 text-red-400 border border-red-500/30 whitespace-nowrap">
-                          <XCircle className="w-3 h-3 shrink-0" />
-                          <span>{t('practice.status_failed')}</span>
-                        </span>
-                      )}
-                    </td>
-
-                    {/* 10. Audio Player Button */}
-                    <td className="px-3 py-3 text-center">
-                      {hasAudio ? (
+                  <React.Fragment key={subId}>
+                    <tr className={`transition-colors border-b border-gray-800/60 ${
+                      isExpanded ? 'bg-gray-800/60' : 'hover:bg-gray-800/30'
+                    }`}>
+                      {/* 0. Chevron Expand Button */}
+                      <td className="px-2 py-3 text-center">
                         <button
                           type="button"
-                          onClick={() => handlePlayAudio(sub)}
-                          disabled={isAudioLoading}
-                          className={`p-2 rounded-xl border transition-all cursor-pointer inline-flex items-center justify-center ${
-                            isAudioPlaying
-                              ? 'bg-lime-400 text-gray-950 border-lime-400 shadow-md shadow-lime-400/30 scale-105 animate-pulse'
-                              : isAudioLoading
-                              ? 'bg-gray-800 text-lime-400 border-gray-700'
-                              : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-700 hover:text-white'
+                          onClick={() => setExpandedSubId(isExpanded ? null : subId)}
+                          className={`p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-transform duration-200 cursor-pointer ${
+                            isExpanded ? 'rotate-180 text-lime-400 bg-gray-700' : ''
                           }`}
-                          title={isAudioPlaying ? 'Pause' : t('sub.th_listen')}
+                          title={isExpanded ? t('sub.collapse_details') : t('sub.expand_details')}
                         >
-                          {isAudioLoading ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : isAudioPlaying ? (
-                            <Pause className="w-3.5 h-3.5 fill-current" />
-                          ) : (
-                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
-                          )}
+                          <ChevronDown className="w-3.5 h-3.5" />
                         </button>
-                      ) : (
-                        <span className="text-gray-600 text-xs">-</span>
-                      )}
-                    </td>
-                  </tr>
+                      </td>
+
+                      {/* 1. Student Email */}
+                      <td className="px-3.5 py-3 font-mono font-medium text-gray-200 truncate max-w-[200px]" title={sub.studentEmail}>
+                        {sub.studentEmail}
+                      </td>
+
+                      {/* 2. Assignment / Word */}
+                      <td className="px-3.5 py-3 max-w-[220px]">
+                        {assignment?.title ? (
+                          <div>
+                            <p className="font-bold text-white truncate text-xs sm:text-sm font-sans" title={assignment.title}>
+                              {assignment.title}
+                            </p>
+                            <p className="font-sans text-gray-400 text-xs truncate" title={sub.word}>
+                              {sub.word}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="font-sans text-white font-medium truncate text-xs sm:text-sm" title={sub.word}>
+                            {sub.word}
+                          </p>
+                        )}
+                      </td>
+
+                      {/* 3. Submitted At */}
+                      <td className="px-3 py-3 text-center font-mono text-[11px] text-gray-400 whitespace-nowrap">
+                        {formattedTime}
+                      </td>
+
+                      {/* 4. Attempt */}
+                      <td className="px-3 py-3 text-center font-mono text-xs text-gray-400">
+                        {sub.attemptNumber ? `${sub.attemptNumber} / ${assignment?.maxAttempts || 3}` : '1'}
+                      </td>
+
+                      {/* 5. Phoneme Score (Clean White) */}
+                      <td className="px-3 py-3 text-center font-mono font-bold text-gray-200 whitespace-nowrap text-xs sm:text-sm">
+                        {phonemeScore}
+                      </td>
+
+                      {/* 6. DTW Score (Clean White) */}
+                      <td className="px-3 py-3 text-center font-mono font-bold text-gray-200 whitespace-nowrap text-xs sm:text-sm">
+                        {dtwScore}
+                      </td>
+
+                      {/* 7. Whisper Score (Clean White) */}
+                      <td className="px-3 py-3 text-center font-mono font-bold text-gray-200 whitespace-nowrap text-xs sm:text-sm">
+                        {whisperScore}
+                      </td>
+
+                      {/* 8. Total Score (Colored by Result: Green if Passed, Red if Failed) */}
+                      <td className={`px-3 py-3 text-center font-mono font-black text-sm sm:text-base whitespace-nowrap ${
+                        sub.isPassed ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        {totalScore}
+                      </td>
+
+                      {/* 9. Result Status */}
+                      <td className="px-3.5 py-3 text-center whitespace-nowrap">
+                        {sub.isPassed ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-green-500/15 text-green-400 border border-green-500/30 whitespace-nowrap">
+                            <CheckCircle2 className="w-3 h-3 shrink-0" />
+                            <span>{t('practice.status_passed')}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-500/15 text-red-400 border border-red-500/30 whitespace-nowrap">
+                            <XCircle className="w-3 h-3 shrink-0" />
+                            <span>{t('practice.status_failed')}</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 10. Manage Action Button */}
+                      <td className="px-3 py-3 text-center relative">
+                        <button
+                          type="button"
+                          onClick={() => setManagePopoverSubId(managePopoverSubId === subId ? null : subId)}
+                          className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors cursor-pointer inline-flex items-center justify-center"
+                          title={t('sub.th_manage')}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Action Popover Menu */}
+                        {managePopoverSubId === subId && (
+                          <div className="absolute right-3 top-12 w-48 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-1.5 z-50 text-left space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingNoteSub(sub);
+                                setManagePopoverSubId(null);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-blue-400 hover:bg-gray-800 rounded-xl transition-colors cursor-pointer font-bold"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                              <span>{t('sub.add_note')}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeletingSub(sub);
+                                setManagePopoverSubId(null);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-gray-800 rounded-xl transition-colors cursor-pointer font-bold"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>{t('sub.delete_sub')}</span>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* Expandable Karaoke & Diagnostics Details Sub-Row */}
+                    {isExpanded && (
+                      <tr className="bg-gray-950/90 border-b border-gray-800/80">
+                        <td colSpan={11} className="p-4 sm:p-6 space-y-5 animate-in fade-in duration-200">
+                          {/* Teacher Note Banner */}
+                          {sub.teacherNote && (
+                            <div className="p-4 rounded-2xl bg-blue-950/40 border border-blue-500/30 flex items-start justify-between gap-3 shadow-md">
+                              <div className="flex items-start gap-2.5">
+                                <MessageSquare className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                                <div className="space-y-0.5">
+                                  <span className="text-xs font-bold text-blue-300 uppercase tracking-wide">
+                                    {t('sub.teacher_note')}:
+                                  </span>
+                                  <p className="text-xs sm:text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                                    {sub.teacherNote}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setEditingNoteSub(sub)}
+                                className="text-xs text-blue-400 hover:underline shrink-0 cursor-pointer font-bold"
+                              >
+                                {t('common.edit')}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* 4 Detailed Score Cards */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                            <div className="bg-gray-900/90 p-3 rounded-2xl border border-gray-800">
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_phonetics')}</span>
+                              <strong className="text-blue-400 font-mono text-xl font-black">{phonemeScore}</strong>
+                            </div>
+                            <div className="bg-gray-900/90 p-3 rounded-2xl border border-gray-800">
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_intonation')}</span>
+                              <strong className="text-purple-400 font-mono text-xl font-black">{dtwScore}</strong>
+                            </div>
+                            <div className="bg-gray-900/90 p-3 rounded-2xl border border-gray-800">
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_completeness')}</span>
+                              <strong className="text-pink-400 font-mono text-xl font-black">{whisperScore}</strong>
+                            </div>
+                            <div className="bg-gray-900/90 p-3 rounded-2xl border border-gray-800">
+                              <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_overall')}</span>
+                              <strong className={`font-mono text-xl font-black ${sub.isPassed ? 'text-green-400' : 'text-red-400'}`}>
+                                {totalScore}
+                              </strong>
+                            </div>
+                          </div>
+
+                          {/* Dark Audio Player Waveform */}
+                          {sub.audioUrl && (
+                            <div className="space-y-1.5">
+                              <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                                <Volume2 className="w-3.5 h-3.5 text-lime-400" />
+                                Audio Playback ({sub.studentEmail} - Attempt #{sub.attemptNumber || 1}):
+                              </span>
+                              <DarkAudioPlayer
+                                audioUrl={sub.audioUrl}
+                                onTimeUpdate={(cTime, dur) => {
+                                  setKaraokeCurrentTime(cTime);
+                                  setKaraokeDuration(dur);
+                                  setIsKaraokePlaying(true);
+                                }}
+                                onEnded={() => {
+                                  setIsKaraokePlaying(false);
+                                  setKaraokeCurrentTime(0);
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Word-Level Karaoke Visualizer */}
+                          <PhonemeKaraokeVisualizer
+                            expectedWord={sub.word}
+                            charScores={sub.charScores || sub.detailedScore?.char_scores}
+                            currentTime={karaokeCurrentTime}
+                            duration={karaokeDuration}
+                            isPlaying={isKaraokePlaying}
+                          />
+
+                          {/* AI Feedback if available */}
+                          {sub.feedback && (
+                            <div className="p-3.5 rounded-xl bg-gray-900 border border-gray-800 text-xs text-gray-300">
+                              <span className="font-bold text-gray-400 block mb-1">AI Feedback:</span>
+                              <p className="leading-relaxed">{sub.feedback}</p>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Modal 1: Add / Edit Teacher Note */}
+      {editingNoteSub && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setEditingNoteSub(null)}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 text-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-blue-400">
+              <div className="w-10 h-10 rounded-2xl bg-blue-500/20 flex items-center justify-center shrink-0">
+                <MessageSquare className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-white">{t('sub.note_modal_title')}</h3>
+                <p className="text-xs text-gray-400 font-mono">
+                  {editingNoteSub.studentEmail} • {editingNoteSub.word}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveNote} className="space-y-4">
+              <div>
+                <textarea
+                  rows={4}
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder={t('sub.note_placeholder')}
+                  className="w-full bg-gray-950 border border-gray-700 rounded-xl p-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-400 text-xs sm:text-sm font-sans resize-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingNoteSub(null)}
+                  className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-sm transition-colors cursor-pointer"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingNote}
+                  className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {savingNote ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  <span>{t('common.save')}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Confirm Delete Single Submission */}
+      {deletingSub && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setDeletingSub(null)}
+        >
+          <div
+            className="bg-gray-900 border border-gray-700 text-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-white">{t('sub.delete_confirm_title')}</h3>
+                <p className="text-xs text-gray-400 font-mono">
+                  {deletingSub.studentEmail} • Attempt #{deletingSub.attemptNumber || 1}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-300 leading-relaxed">
+              {t('sub.delete_confirm_desc')}
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingSub(null)}
+                className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-sm transition-colors cursor-pointer"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSubmission}
+                disabled={deletingSubLoading}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 cursor-pointer"
+              >
+                {deletingSubLoading ? t('common.processing') : t('common.delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

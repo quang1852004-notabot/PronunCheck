@@ -95,6 +95,8 @@ export interface SubmissionData {
     actual: string;
   };
   feedback?: string;
+  teacherNote?: string;
+  teacherNoteUpdatedAt?: any;
   isPassed: boolean;
   attemptNumber: number;
   createdAt?: any;
@@ -197,6 +199,25 @@ export async function deleteAssignment(classId: string, assignmentId: string): P
   await deleteDoc(docRef);
 }
 
+export async function deleteAssignmentWithSubmissions(
+  classId: string, 
+  assignmentId: string, 
+  deleteSubmissions: boolean
+): Promise<void> {
+  const docRef = doc(db, `classes/${classId}/assignments`, assignmentId);
+  await deleteDoc(docRef);
+
+  if (deleteSubmissions) {
+    const q = query(
+      collection(db, `classes/${classId}/submissions`),
+      where('assignmentId', '==', assignmentId)
+    );
+    const snap = await getDocs(q);
+    const deletePromises = snap.docs.map(d => deleteDoc(d.ref));
+    await Promise.all(deletePromises);
+  }
+}
+
 export async function updateScoringConfig(classId: string, config: ScoringConfig): Promise<void> {
   const docRef = doc(db, 'classes', classId);
   await updateDoc(docRef, cleanForFirestore({
@@ -235,6 +256,19 @@ export async function createSubmission(classId: string, submission: Omit<Submiss
     createdAt: serverTimestamp()
   });
   return ref.id;
+}
+
+export async function deleteSubmission(classId: string, submissionId: string): Promise<void> {
+  const docRef = doc(db, `classes/${classId}/submissions`, submissionId);
+  await deleteDoc(docRef);
+}
+
+export async function updateSubmissionNote(classId: string, submissionId: string, note: string): Promise<void> {
+  const docRef = doc(db, `classes/${classId}/submissions`, submissionId);
+  await updateDoc(docRef, cleanForFirestore({
+    teacherNote: note.trim(),
+    teacherNoteUpdatedAt: serverTimestamp()
+  }));
 }
 
 export async function getClassesByTeacher(teacherId: string): Promise<ClassData[]> {

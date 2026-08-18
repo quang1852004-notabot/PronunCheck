@@ -84,12 +84,16 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
     }
   };
 
-  const handleDeleteAssignment = async () => {
+  const handleDeleteAssignment = async (deleteSubmissions: boolean) => {
     if (!deletingAssignment?.id) return;
     setIsDeleting(true);
     try {
-      await deleteAssignment(classId, deletingAssignment.id);
+      const { deleteAssignmentWithSubmissions } = await import('@/app/lib/firestore');
+      await deleteAssignmentWithSubmissions(classId, deletingAssignment.id, deleteSubmissions);
       setAssignments(prev => prev.filter(a => a.id !== deletingAssignment.id));
+      if (deleteSubmissions) {
+        setSubmissions(prev => prev.filter(s => s.assignmentId !== deletingAssignment.id));
+      }
       setDeletingAssignment(null);
       success(t('assignment.deleted_success'));
     } catch (error) {
@@ -334,7 +338,12 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
 
           {/* Tab 3: Submissions Table */}
           <div className={activeTab === 'submissions' ? 'animate-in fade-in duration-200' : 'hidden'}>
-            <SubmissionTable submissions={submissions} assignments={assignments} classData={classData} />
+            <SubmissionTable 
+              submissions={submissions} 
+              assignments={assignments} 
+              classData={classData} 
+              onSubmissionUpdated={loadData}
+            />
           </div>
 
           {/* Tab 4: Class Management */}
@@ -360,45 +369,60 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
           onUpdated={loadData}
         />
 
-        {/* Delete Confirmation Modal */}
+        {/* Delete Confirmation Modal with Dual Options */}
         {deletingAssignment && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in"
             onClick={() => setDeletingAssignment(null)}
           >
             <div
-              className="bg-gray-900 border border-gray-700 text-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-4"
+              className="bg-gray-900 border border-gray-700 text-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl space-y-5"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center gap-3 text-red-400">
-                <div className="w-10 h-10 rounded-2xl bg-red-500/20 flex items-center justify-center shrink-0">
+                <div className="w-11 h-11 rounded-2xl bg-red-500/20 flex items-center justify-center shrink-0">
                   <AlertTriangle className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="font-bold text-lg text-white">{t('assignment.delete_confirm_title')}</h3>
-                  <p className="text-xs text-gray-400 font-mono">{deletingAssignment.word}</p>
+                  <p className="text-xs text-gray-400 font-mono">
+                    {deletingAssignment.title ? `${deletingAssignment.title} (${deletingAssignment.word})` : deletingAssignment.word}
+                  </p>
                 </div>
               </div>
 
-              <p className="text-xs text-gray-300 leading-relaxed">
+              <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
                 {t('assignment.delete_confirm_desc')}
               </p>
 
-              <div className="flex gap-3 pt-2">
+              {/* 2 Action Buttons + Cancel Button */}
+              <div className="space-y-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteAssignment(true)}
+                  disabled={isDeleting}
+                  className="w-full py-3 px-4 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs sm:text-sm transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{t('assignment.delete_with_subs')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDeleteAssignment(false)}
+                  disabled={isDeleting}
+                  className="w-full py-3 px-4 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-300 border border-yellow-500/30 font-bold rounded-xl text-xs sm:text-sm transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>{t('assignment.delete_only_assign')}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setDeletingAssignment(null)}
-                  className="flex-1 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl font-medium text-sm transition-colors cursor-pointer"
+                  disabled={isDeleting}
+                  className="w-full py-2.5 px-4 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white rounded-xl font-medium text-xs sm:text-sm transition-colors cursor-pointer"
                 >
                   {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteAssignment}
-                  disabled={isDeleting}
-                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 cursor-pointer"
-                >
-                  {isDeleting ? t('common.processing') : t('common.delete')}
                 </button>
               </div>
             </div>

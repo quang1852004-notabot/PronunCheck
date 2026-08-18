@@ -7,7 +7,8 @@ import {
   CheckCircle2, 
   XCircle, 
   ChevronDown, 
-  Volume2
+  Volume2,
+  MessageSquare
 } from 'lucide-react';
 import { SubmissionData } from '@/app/lib/firestore';
 import { getAudioUrl } from '@/app/lib/storage';
@@ -162,23 +163,40 @@ function AttemptAccordionItem({
       {/* Expanded Accordion Body */}
       {isOpen && (
         <div className="p-4 sm:p-6 border-t border-gray-800/80 bg-gray-900/90 space-y-5 animate-in fade-in duration-200">
+          {/* 0. Teacher Note Banner if available */}
+          {submission.teacherNote && (
+            <div className="p-4 rounded-2xl bg-blue-950/40 border border-blue-500/40 flex items-start gap-3 shadow-md">
+              <MessageSquare className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="text-xs font-bold text-blue-300 uppercase tracking-wide">
+                  {t('practice.teacher_note_title')}:
+                </span>
+                <p className="text-xs sm:text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                  {submission.teacherNote}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* 1. Score Breakdown 4 Clean Cards (Integers 0 - 100 without %) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
               <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_phonetics')}</span>
-              <strong className="text-blue-400 font-mono text-xl font-black">{phonemeScore}</strong>
+              <strong className="text-gray-200 font-mono text-xl font-black">{phonemeScore}</strong>
             </div>
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
               <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_intonation')}</span>
-              <strong className="text-purple-400 font-mono text-xl font-black">{dtwScore}</strong>
+              <strong className="text-gray-200 font-mono text-xl font-black">{dtwScore}</strong>
             </div>
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
               <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_completeness')}</span>
-              <strong className="text-pink-400 font-mono text-xl font-black">{whisperScore}</strong>
+              <strong className="text-gray-200 font-mono text-xl font-black">{whisperScore}</strong>
             </div>
             <div className="bg-gray-950/80 p-3 rounded-2xl border border-gray-800">
               <span className="text-gray-400 block text-[10px] uppercase font-bold">{t('practice.score_overall')}</span>
-              <strong className="text-lime-400 font-mono text-xl font-black">{totalScore}</strong>
+              <strong className={`font-mono text-xl font-black ${submission.isPassed ? 'text-green-400' : 'text-red-400'}`}>
+                {totalScore}
+              </strong>
             </div>
           </div>
 
