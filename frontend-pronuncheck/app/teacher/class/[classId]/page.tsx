@@ -14,6 +14,7 @@ import {
   ClassData, 
   AssignmentData, 
   SubmissionData 
+} from '@/app/lib/firestore';
 import SubmissionTable from '@/app/teacher/components/SubmissionTable';
 import ClassManagement from '@/app/teacher/components/ClassManagement';
 import AssignmentModal from '@/app/teacher/components/AssignmentModal';
