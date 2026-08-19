@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, use, useCallback } from 'react';
+import React, { useState, use } from 'react';
 import Link from 'next/link';
 import AuthGuard from '@/app/components/AuthGuard';
 import Navbar from '@/app/components/Navbar';
@@ -16,19 +16,14 @@ import ErrorBoundary from '@/app/components/ErrorBoundary';
 import { startAiTimer, endAiTimer, captureAppError } from '@/app/lib/monitoring';
 import { track } from '@vercel/analytics';
 import { 
-  getClass, 
-  getAssignments, 
-  getSubmissionsByStudent, 
   createSubmission,
   joinClass,
-  isClassMember,
-  ClassData,
-  AssignmentData,
   SubmissionData
 } from '@/app/lib/firestore';
 import { uploadAudio } from '@/app/lib/storage';
 import { getGoogleTtsUrl } from '@/app/lib/tts';
-import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Award, RefreshCcw, Sparkles, Volume2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Volume2 } from 'lucide-react';
+import { useClassData, useClassMembership, useStudentAssignmentsWithSubmissions } from '@/app/lib/hooks';
 
 export default function StudentClassPage({ params }: { params: Promise<{ classId: string }> }) {
   const { classId } = use(params);
@@ -36,16 +31,20 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
   const { t } = useLanguage();
   const { success, error: toastError } = useToast();
   
-  const [classData, setClassData] = useState<ClassData | null>(null);
-  const [isMember, setIsMember] = useState<boolean>(false);
-  const [assignments, setAssignments] = useState<(AssignmentData & { 
-    submissions: SubmissionData[];
-    attemptsUsed: number;
-    isPassed: boolean;
-  })[]>([]);
+  // --- SWR Hooks for Parallel Data Fetching ---
+  const { data: classData, error: classErrorRaw, mutate: mutateClass } = useClassData(classId);
+  const { data: isMemberData, mutate: mutateMembership } = useClassMembership(classId, user?.uid || null);
   
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const isPublic = classData && !classData.password;
+  const isMember = isMemberData || isPublic;
+  
+  const { data: assignments = [], mutate: mutateAssignments } = useStudentAssignmentsWithSubmissions(
+    isMember ? classId : null,
+    user?.uid || null
+  );
+
+  const loading = classData === undefined;
+  const error = classErrorRaw ? 'Có lỗi xảy ra khi tải dữ liệu lớp học.' : null;
   
   // Password prompt state if not a member yet
   const [passwordInput, setPasswordInput] = useState('');
@@ -53,6 +52,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
 
   const [activeAssignmentId, setActiveAssignmentId] = useState<string | null>(null);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   // Latest Assessment Result for Active Assignment
   const [assessmentResult, setAssessmentResult] = useState<{
@@ -76,57 +76,6 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
 
   // Selected Submission from History
   const [selectedHistorySub, setSelectedHistorySub] = useState<SubmissionData | null>(null);
-
-  const loadData = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getClass(classId);
-      if (!data) {
-        setError(t('student.class_not_found'));
-        return;
-      }
-      setClassData(data);
-
-      const hasJoined = await isClassMember(classId, user.uid);
-      const isPublic = !data.password;
-
-      if (hasJoined || isPublic) {
-        setIsMember(true);
-        if (!hasJoined && isPublic) {
-          await joinClass(classId, user.uid, user.email || '');
-        }
-
-        // Load assignments & submissions
-        const assignmentsData = await getAssignments(classId);
-        const assignmentsWithSubmissions = await Promise.all(
-          assignmentsData.map(async (assign) => {
-            const subs = await getSubmissionsByStudent(classId, user.uid, assign.id!);
-            const isPassed = subs.some(s => s.isPassed);
-            return {
-              ...assign,
-              submissions: subs,
-              attemptsUsed: subs.length,
-              isPassed
-            };
-          })
-        );
-        setAssignments(assignmentsWithSubmissions);
-      } else {
-        setIsMember(false);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError('Có lỗi xảy ra khi tải dữ liệu lớp học.');
-    } finally {
-      setLoading(false);
-    }
-  }, [classId, user, t]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   const handleVerifyPasswordAndJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,6 +105,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     setSubmittingId(assignmentId);
     setAssessmentResult(null);
     setSelectedHistorySub(null);
+    setServerError(null);
     const startTime = startAiTimer(`class-assess-${assignmentId}`);
 
     try {
@@ -211,24 +161,48 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       }
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
+      
       let res;
-      try {
-        res = await fetch(`${apiUrl}/api/v1/assess`, {
-          method: 'POST',
-          body: formData,
-        });
-      } catch (fetchErr: any) {
-        throw new Error('Không thể kết nối đến máy chủ AI (api.thuy-tien.pro đang offline hoặc gặp lỗi 502 Bad Gateway). Vui lòng khởi động lại VM Backend trên Google Cloud!');
-      }
+      let data;
+      let attempt = 0;
+      const maxAttemptsFetch = 3;
 
-      if (!res.ok) {
-        if (res.status === 502 || res.status === 503) {
-          throw new Error('Máy chủ chấm điểm AI (GCP VM) hiện đang tạm dừng hoặc chưa khởi động service FastAPI (Mã lỗi 502 Bad Gateway). Vui lòng bật lại server!');
+      while (attempt < maxAttemptsFetch) {
+        try {
+          res = await fetch(`${apiUrl}/api/v1/assess`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (res.ok) {
+            data = await res.json();
+            break; 
+          }
+
+          if (res.status === 502 || res.status === 503) {
+            attempt++;
+            if (attempt >= maxAttemptsFetch) {
+              setServerError('Máy chủ AI đang khởi động/bảo trì. Vui lòng chờ 10-15 giây và thử lại.');
+              setSubmittingId(null);
+              return;
+            }
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+
+          throw new Error(`Máy chủ chấm điểm AI trả về mã lỗi ${res.status}`);
+        } catch (fetchErr: any) {
+          attempt++;
+          if (attempt >= maxAttemptsFetch) {
+            setServerError('Máy chủ AI đang khởi động/bảo trì. Vui lòng chờ 10-15 giây và thử lại.');
+            setSubmittingId(null);
+            return;
+          }
+          await new Promise(r => setTimeout(r, 2000));
         }
-        throw new Error(`Máy chủ chấm điểm AI trả về mã lỗi ${res.status}`);
       }
 
-      const data = await res.json();
+      if (!data) return;
       const durationMs = endAiTimer(expectedWord, startTime, `class-assess-${assignmentId}`);
 
       // Theo dõi custom event trên Vercel Analytics
@@ -304,12 +278,37 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     }
   };
 
+  const skeletonUI = (
+    <main className="min-h-screen bg-gray-900 text-white flex flex-col w-full max-w-full overflow-x-hidden">
+      <Navbar currentRole="student" />
+      <div className="flex-1 p-4 sm:p-6 md:p-8 max-w-4xl mx-auto w-full space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-800/80 p-5 rounded-3xl border border-gray-700/80 animate-pulse">
+          <div className="flex items-center gap-3">
+             <div className="w-10 h-10 bg-gray-700 rounded-xl" />
+             <div className="space-y-2">
+               <div className="h-6 bg-gray-700 rounded w-48" />
+               <div className="h-3 bg-gray-700 rounded w-32" />
+             </div>
+          </div>
+        </div>
+        <div className="space-y-6">
+          <div className="h-6 bg-gray-700 rounded w-40 mb-4 animate-pulse" />
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 h-32 border border-gray-700/80 animate-pulse flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="h-6 bg-gray-700 rounded w-1/3" />
+                <div className="h-4 bg-gray-700 rounded w-1/4" />
+              </div>
+              <div className="h-4 bg-gray-700 rounded w-20 self-end" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+
   if (loading) {
-    return (
-      <main className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-lime-400"></div>
-      </main>
-    );
+    return skeletonUI;
   }
 
   if (error || !classData) {
@@ -329,7 +328,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
   }
 
   return (
-    <AuthGuard allowedRole="student">
+    <AuthGuard allowedRole="student" fallback={skeletonUI}>
       <main className="min-h-screen bg-gray-900 text-white flex flex-col w-full max-w-full overflow-x-hidden">
         <Navbar currentRole="student" />
 
@@ -517,10 +516,22 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                                     onAudioReady={(blob) => handleAudioReady(assignment.id || '', assignment.word, assignment.targetPhoneme, blob)}
                                     disabled={submittingId === assignment.id}
                                   />
+                                  
+                                  {serverError && submittingId !== assignment.id && (
+                                    <div className="bg-orange-950/40 border border-orange-500/40 rounded-2xl p-4 flex items-start gap-3 animate-in fade-in mt-4">
+                                      <div className="mt-0.5 text-orange-400">⚠️</div>
+                                      <div>
+                                        <h4 className="font-bold text-orange-400 text-sm mb-1">Không thể kết nối Máy chủ AI</h4>
+                                        <p className="text-xs text-orange-200">{serverError}</p>
+                                      </div>
+                                    </div>
+                                  )}
+
                                   {submittingId === assignment.id && (
-                                    <div className="flex flex-col items-center justify-center p-4 space-y-2">
-                                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-lime-400"></div>
-                                      <p className="text-xs text-lime-400 font-medium animate-pulse">{t('common.processing')}</p>
+                                    <div className="space-y-4 pt-4 border-t border-gray-700/80 animate-pulse mt-4">
+                                      <div className="h-32 bg-gray-800/80 rounded-3xl border border-gray-700/50"></div>
+                                      <div className="h-12 bg-gray-800/80 rounded-xl border border-gray-700/50"></div>
+                                      <div className="h-24 bg-gray-800/80 rounded-2xl border border-gray-700/50"></div>
                                     </div>
                                   )}
                                 </div>
@@ -574,6 +585,14 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                                     currentTime={karaokeCurrentTime}
                                     duration={karaokeDuration}
                                     isPlaying={isKaraokePlaying}
+                                  />
+                                  
+                                  {/* Character-Level Diagnostic Card */}
+                                  <PhonemeDiagnosticCard
+                                    worstChar={displayWorstChar}
+                                    expectedWord={assignment.word}
+                                    feedback={displayFeedback || ''}
+                                    isPassed={displayIsPassed}
                                   />
                                 </div>
                               )}

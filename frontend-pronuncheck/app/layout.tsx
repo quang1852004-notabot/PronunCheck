@@ -8,8 +8,7 @@ import Pwa from "@/app/Pwa";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/react";
 
-// Tat static prerendering - Firebase can browser APIs nen khong the chay server-side
-export const dynamic = "force-dynamic";
+// Firebase Auth state is handled client-side
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   variable: "--font-sans",

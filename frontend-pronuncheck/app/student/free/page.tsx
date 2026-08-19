@@ -13,7 +13,8 @@ import PhonemeDiagnosticCard, { CharScoreItem, WorstCharItem } from '@/app/compo
 import ErrorBoundary from '@/app/components/ErrorBoundary';
 import { startAiTimer, endAiTimer, captureAppError } from '@/app/lib/monitoring';
 import { track } from '@vercel/analytics';
-import { ArrowLeft, Sparkles, CheckCircle2, XCircle, RefreshCcw } from 'lucide-react';
+import { ArrowLeft, Sparkles, CheckCircle2, XCircle, RefreshCcw, Volume2, AlertTriangle } from 'lucide-react';
+import { playGermanSpeech } from '@/app/lib/tts';
 
 export default function FreeModePage() {
   const { t } = useLanguage();
@@ -21,6 +22,24 @@ export default function FreeModePage() {
   const [word, setWord] = useState('');
   const [loading, setLoading] = useState(false);
   
+  const [isPlayingTts, setIsPlayingTts] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const handleTestTts = async () => {
+    if (!word.trim()) {
+      toastError(t('recorder.enter_word_first'));
+      return;
+    }
+    setIsPlayingTts(true);
+    try {
+      await playGermanSpeech(word.trim(), 1.0);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsPlayingTts(false);
+    }
+  };
+
   const [result, setResult] = useState<{ 
     passed: boolean; 
     feedback: string;
@@ -48,6 +67,7 @@ export default function FreeModePage() {
 
     setLoading(true);
     setResult(null);
+    setServerError(null);
     const startTime = startAiTimer('free-mode-assess');
 
     try {
@@ -59,24 +79,48 @@ export default function FreeModePage() {
       formData.append('target_phoneme', 'auto');
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
+      
       let res;
-      try {
-        res = await fetch(`${apiUrl}/api/v1/assess`, {
-          method: 'POST',
-          body: formData,
-        });
-      } catch (fetchErr: any) {
-        throw new Error('Không thể kết nối đến máy chủ AI (api.thuy-tien.pro đang offline hoặc gặp lỗi 502 Bad Gateway). Vui lòng khởi động lại VM Backend trên Google Cloud!');
-      }
+      let data;
+      let attempt = 0;
+      const maxAttempts = 3;
 
-      if (!res.ok) {
-        if (res.status === 502 || res.status === 503) {
-          throw new Error('Máy chủ chấm điểm AI (GCP VM) hiện đang tạm dừng hoặc chưa khởi động service FastAPI (Mã lỗi 502 Bad Gateway). Vui lòng bật lại server!');
+      while (attempt < maxAttempts) {
+        try {
+          res = await fetch(`${apiUrl}/api/v1/assess`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (res.ok) {
+            data = await res.json();
+            break; 
+          }
+
+          if (res.status === 502 || res.status === 503) {
+            attempt++;
+            if (attempt >= maxAttempts) {
+              setServerError('Máy chủ AI đang khởi động/bảo trì. Vui lòng chờ 10-15 giây và thử lại.');
+              setLoading(false);
+              return;
+            }
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+
+          throw new Error(`Máy chủ trả về mã lỗi ${res.status}`);
+        } catch (fetchErr: any) {
+          attempt++;
+          if (attempt >= maxAttempts) {
+            setServerError('Máy chủ AI đang khởi động/bảo trì. Vui lòng chờ 10-15 giây và thử lại.');
+            setLoading(false);
+            return;
+          }
+          await new Promise(r => setTimeout(r, 2000));
         }
-        throw new Error(`Máy chủ trả về mã lỗi ${res.status}`);
       }
 
-      const data = await res.json();
+      if (!data) return;
       const durationMs = endAiTimer(word.trim(), startTime, 'free-mode-assess');
       
       // Theo dõi số liệu Custom Event trên Vercel Analytics
@@ -152,24 +196,47 @@ export default function FreeModePage() {
                 <label className="block text-gray-300 mb-2 font-bold text-sm">
                   {t('practice.word_to_practice')}
                 </label>
-                <input
-                  type="text"
-                  value={word}
-                  onChange={(e) => setWord(e.target.value)}
-                  placeholder={t('practice.word_placeholder')}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-2xl px-4 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400 text-lg font-bold transition-all font-mono"
-                  disabled={loading}
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={word}
+                    onChange={(e) => setWord(e.target.value)}
+                    placeholder={t('practice.word_placeholder')}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-2xl pl-4 pr-14 py-3.5 text-white placeholder-gray-500 focus:outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400 text-lg font-bold transition-all font-mono"
+                    disabled={loading}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestTts}
+                    disabled={isPlayingTts || !word.trim() || loading}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-emerald-400 rounded-xl transition-all cursor-pointer shadow-sm"
+                    title="Nghe phát âm mẫu"
+                  >
+                    <Volume2 className={`w-5 h-5 ${isPlayingTts ? 'animate-pulse text-emerald-300' : ''}`} />
+                  </button>
+                </div>
               </div>
 
               <div>
                 <AudioRecorder onAudioReady={handleAudioReady} disabled={loading || !word.trim()} />
               </div>
 
+              {serverError && !loading && (
+                <div className="bg-orange-950/40 border border-orange-500/40 rounded-2xl p-5 flex items-start gap-3 animate-in fade-in">
+                  <AlertTriangle className="w-6 h-6 text-orange-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-orange-400 text-base mb-1">Không thể kết nối Máy chủ AI</h4>
+                    <p className="text-sm text-orange-200">{serverError}</p>
+                  </div>
+                </div>
+              )}
+
               {loading && (
-                <div className="flex flex-col items-center justify-center p-8 space-y-3">
-                  <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-lime-400"></div>
-                  <p className="text-lime-400 text-sm font-medium animate-pulse">{t('common.processing')}</p>
+                <div className="space-y-4 pt-4 border-t border-gray-700/80 animate-pulse">
+                  <div className="h-32 bg-gray-800/80 rounded-3xl border border-gray-700/50"></div>
+                  <div className="h-12 bg-gray-800/80 rounded-xl border border-gray-700/50"></div>
+                  <div className="h-24 bg-gray-800/80 rounded-2xl border border-gray-700/50"></div>
+                  <div className="h-32 bg-gray-800/80 rounded-3xl border border-gray-700/50"></div>
                 </div>
               )}
 
@@ -257,6 +324,14 @@ export default function FreeModePage() {
                     currentTime={karaokeCurrentTime}
                     duration={karaokeDuration}
                     isPlaying={isKaraokePlaying}
+                  />
+
+                  {/* Character-Level Diagnostic Card */}
+                  <PhonemeDiagnosticCard
+                    worstChar={result.worstChar}
+                    expectedWord={word}
+                    feedback={result.feedback}
+                    isPassed={result.passed}
                   />
 
                   <div className="text-center pt-2">

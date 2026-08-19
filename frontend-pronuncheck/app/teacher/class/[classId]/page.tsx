@@ -1,19 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, use } from 'react';
+import React, { useState, use } from 'react';
 import AuthGuard from '@/app/components/AuthGuard';
 import Navbar from '@/app/components/Navbar';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
 import { 
-  getClass, 
-  getAssignments, 
-  getSubmissions, 
   deleteAssignment,
   updateAssignment,
-  ClassData, 
-  AssignmentData, 
-  SubmissionData 
+  AssignmentData
 } from '@/app/lib/firestore';
 import SubmissionTable from '@/app/teacher/components/SubmissionTable';
 import ClassManagement from '@/app/teacher/components/ClassManagement';
@@ -33,6 +28,8 @@ import {
   PlusCircle,
   Volume2
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useClassData, useClassAssignments, useClassSubmissions } from '@/app/lib/hooks';
 
 export default function ClassDetail({ params }: { params: Promise<{ classId: string }> }) {
   const { classId } = use(params);
@@ -40,10 +37,12 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
   const { t } = useLanguage();
   const { success, error: toastError } = useToast();
 
-  const [classData, setClassData] = useState<ClassData | null>(null);
-  const [assignments, setAssignments] = useState<AssignmentData[]>([]);
-  const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: classData, mutate: mutateClassData } = useClassData(classId);
+  const { data: assignments = [], mutate: mutateAssignments } = useClassAssignments(classId);
+  const { data: submissions = [], mutate: mutateSubmissions } = useClassSubmissions(classId);
+
+  const loading = classData === undefined;
+  
   const [activeTab, setActiveTab] = useState<'assignments' | 'submissions' | 'management'>('assignments');
   const [copied, setCopied] = useState(false);
 
@@ -53,28 +52,9 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
   const [deletingAssignment, setDeletingAssignment] = useState<AssignmentData | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadData = useCallback(async () => {
-    if (!classId) return;
-    setLoading(true);
-    try {
-      const data = await getClass(classId);
-      if (data) {
-        setClassData(data);
-        const asgns = await getAssignments(classId);
-        setAssignments(asgns);
-        const subs = await getSubmissions(classId);
-        setSubmissions(subs);
-      }
-    } catch (err) {
-      console.error('Error loading class data:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [classId]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const loadData = async () => {
+    await Promise.all([mutateClassData(), mutateAssignments(), mutateSubmissions()]);
+  };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -116,8 +96,34 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
     }
   };
 
+  const skeletonUI = (
+    <main className="min-h-screen bg-gray-900 text-white flex flex-col w-full max-w-full overflow-x-hidden">
+      <Navbar currentRole="teacher" />
+      <div className="flex-1 p-3 sm:p-6 md:p-8 max-w-[1600px] mx-auto w-full space-y-6">
+        <div className="bg-gray-800/90 p-5 sm:p-6 rounded-3xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-gray-700/80 animate-pulse">
+          <div className="flex items-center space-x-3 sm:space-x-4">
+            <div className="w-10 h-10 bg-gray-700 rounded-2xl shrink-0" />
+            <div className="space-y-2">
+              <div className="h-7 bg-gray-700 rounded w-48" />
+              <div className="h-4 bg-gray-700 rounded w-32" />
+            </div>
+          </div>
+          <div className="h-8 bg-gray-700 rounded-xl w-32" />
+        </div>
+        <div className="w-full flex space-x-2 border-b border-gray-700/80 pb-px">
+          <div className="h-10 bg-gray-700 rounded-t-2xl w-32 animate-pulse" />
+          <div className="h-10 bg-gray-800 rounded-t-2xl w-32 animate-pulse" />
+          <div className="h-10 bg-gray-800 rounded-t-2xl w-32 animate-pulse" />
+        </div>
+        <div className="bg-gray-800/90 rounded-3xl p-5 sm:p-6 h-64 border border-gray-700/80 animate-pulse" />
+      </div>
+    </main>
+  );
+
+  if (loading) return skeletonUI;
+
   return (
-    <AuthGuard allowedRole="teacher">
+    <AuthGuard allowedRole="teacher" fallback={skeletonUI}>
       <main className="min-h-screen bg-gray-900 text-white flex flex-col w-full max-w-full overflow-x-hidden">
         <Navbar currentRole="teacher" />
 
