@@ -42,9 +42,15 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      const role = await login(email.trim(), password);
       success('Đăng nhập thành công!');
-      router.push('/');
+      if (role === 'teacher') {
+        router.push('/teacher');
+      } else if (role === 'student') {
+        router.push('/student');
+      } else {
+        router.push('/');
+      }
     } catch (err: any) {
       console.error(err);
       toastError(translateError(err.code || ''));

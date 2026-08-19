@@ -7,7 +7,7 @@ import {
   AssignmentData, 
   ScoringConfig 
 } from '@/app/lib/firestore';
-import { uploadAudio } from '@/app/lib/storage';
+import { uploadAudio, uploadDualAudio } from '@/app/lib/storage';
 import { Timestamp } from 'firebase/firestore';
 import { useLanguage } from '@/app/contexts/LanguageContext';
 import { useToast } from '@/app/contexts/ToastContext';
@@ -81,7 +81,9 @@ export default function AssignmentModal({
   const [enableSampleAudio, setEnableSampleAudio] = useState(false);
   const [sampleAudioType, setSampleAudioType] = useState<'tts' | 'teacher_record'>('tts');
   const [teacherAudioBlob, setTeacherAudioBlob] = useState<Blob | null>(null);
+  const [teacherRawAudioBlob, setTeacherRawAudioBlob] = useState<Blob | null>(null);
   const [teacherAudioUrl, setTeacherAudioUrl] = useState<string | null>(null);
+  const [teacherRawAudioUrl, setTeacherRawAudioUrl] = useState<string | null>(null);
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [isPlayingTts, setIsPlayingTts] = useState(false);
 
@@ -122,7 +124,9 @@ export default function AssignmentModal({
         setEnableSampleAudio(Boolean(assignment.enableSampleAudio));
         setSampleAudioType(assignment.sampleAudioType || 'tts');
         setTeacherAudioUrl(assignment.sampleAudioUrl || null);
+        setTeacherRawAudioUrl(assignment.sampleRawAudioUrl || null);
         setTeacherAudioBlob(null);
+        setTeacherRawAudioBlob(null);
 
         if (assignment.scoringConfig) {
           setScoringMode(assignment.scoringConfig.mode || 'auto');
@@ -132,22 +136,22 @@ export default function AssignmentModal({
         } else {
           setScoringMode('auto');
           setThreshold(0.6);
-          setL0(4.5);
-          setK(0.85);
         }
       } else {
-        // Create mode
+        // Create Mode
         setTitle('');
         setWord('');
         setTargetPhoneme('auto');
-        setMaxAttempts(3);
         setDeadline('');
+        setMaxAttempts(3);
         setIsActive(true);
 
         setEnableSampleAudio(false);
         setSampleAudioType('tts');
         setTeacherAudioBlob(null);
+        setTeacherRawAudioBlob(null);
         setTeacherAudioUrl(null);
+        setTeacherRawAudioUrl(null);
 
         setScoringMode('auto');
         setThreshold(0.6);
@@ -184,18 +188,21 @@ export default function AssignmentModal({
     setLoading(true);
     try {
       let finalSampleUrl = teacherAudioUrl || undefined;
+      let finalSampleRawUrl = teacherRawAudioUrl || undefined;
       let finalStoragePath = assignment?.sampleAudioStoragePath || undefined;
 
       // 1. If teacher recorded new audio blob, upload it to storage
       if (enableSampleAudio && sampleAudioType === 'teacher_record' && teacherAudioBlob) {
-        const uploadRes = await uploadAudio({
+        const uploadRes = await uploadDualAudio({
           classId,
           assignmentId: assignment?.id || 'sample_temp',
           studentId: 'teacher_sample',
-          blob: teacherAudioBlob
+          denoisedBlob: teacherAudioBlob,
+          rawBlob: teacherRawAudioBlob || undefined
         });
-        finalSampleUrl = uploadRes.downloadUrl;
-        finalStoragePath = uploadRes.storagePath;
+        finalSampleUrl = uploadRes.denoisedUrl;
+        finalSampleRawUrl = uploadRes.rawUrl;
+        finalStoragePath = ''; // Using default logic in uploadDualAudio
       }
 
       // 2. Build Scoring Config payload for this assignment
@@ -219,6 +226,7 @@ export default function AssignmentModal({
         enableSampleAudio,
         sampleAudioType: enableSampleAudio ? sampleAudioType : undefined,
         sampleAudioUrl: enableSampleAudio ? finalSampleUrl : undefined,
+        sampleRawAudioUrl: enableSampleAudio ? finalSampleRawUrl : undefined,
         sampleAudioStoragePath: enableSampleAudio ? finalStoragePath : undefined,
         scoringConfig: finalScoringConfig
       };
@@ -504,7 +512,7 @@ export default function AssignmentModal({
                           {/* Audio Preview if available */}
                           {teacherAudioUrl && (
                             <div className="pt-2">
-                              <DarkAudioPlayer audioUrl={teacherAudioUrl} />
+                              <DarkAudioPlayer audioUrl={teacherAudioUrl} rawAudioUrl={teacherRawAudioUrl || undefined} />
                             </div>
                           )}
                         </div>
@@ -772,9 +780,16 @@ export default function AssignmentModal({
         isOpen={isRecordModalOpen}
         targetWord={word.trim()}
         onClose={() => setIsRecordModalOpen(false)}
-        onApply={(blob, previewUrl) => {
-          setTeacherAudioBlob(blob);
-          setTeacherAudioUrl(previewUrl);
+        onApply={(denoisedBlob, rawBlob) => {
+          setTeacherAudioBlob(denoisedBlob);
+          setTeacherAudioUrl(URL.createObjectURL(denoisedBlob));
+          if (rawBlob) {
+            setTeacherRawAudioBlob(rawBlob);
+            setTeacherRawAudioUrl(URL.createObjectURL(rawBlob));
+          } else {
+            setTeacherRawAudioBlob(null);
+            setTeacherRawAudioUrl(null);
+          }
           setSampleAudioType('teacher_record');
         }}
       />

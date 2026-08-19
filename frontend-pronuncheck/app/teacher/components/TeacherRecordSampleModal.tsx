@@ -7,13 +7,12 @@ import { useToast } from '@/app/contexts/ToastContext';
 import AudioLevelMeter from '@/app/components/AudioLevelMeter';
 import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
 import NoiseReductionSlider from '@/app/components/NoiseReductionSlider';
-import { createRnnoiseNode } from '@/app/lib/rnnoise';
 
 interface TeacherRecordSampleModalProps {
   isOpen: boolean;
   targetWord: string;
   onClose: () => void;
-  onApply: (blob: Blob, previewUrl: string) => void;
+  onApply: (denoisedBlob: Blob, rawBlob?: Blob) => void;
 }
 
 export default function TeacherRecordSampleModal({
@@ -97,118 +96,70 @@ export default function TeacherRecordSampleModal({
     setActiveStream(null);
   };
 
-  // Build WebRTC constraints according to noiseLevel
-  const getMediaConstraints = (lvl: number): MediaStreamConstraints => {
-    if (lvl === 0) {
-      return {
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 1,
-        }
-      };
-    }
+  const [isDenoising, setIsDenoising] = useState(false);
+  const [recordedDenoisedBlob, setRecordedDenoisedBlob] = useState<Blob | null>(null);
+  const [recordedRawBlob, setRecordedRawBlob] = useState<Blob | null>(null);
+  const [rawAudioUrl, setRawAudioUrl] = useState<string | null>(null);
 
-    if (lvl === 1) {
-      return {
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: false,
-          channelCount: 1,
-        }
-      };
-    }
+  const processDenoiseBackend = async (rawBlob: Blob) => {
+    setIsDenoising(true);
+    try {
+      const formData = new FormData();
+      formData.append('audio_file', rawBlob, 'raw_audio.webm');
+      formData.append('noise_level', noiseLevel.toString());
 
-    // Levels 2, 3, 4
-    return {
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.thuy-tien.pro';
+      const response = await fetch(`${apiUrl}/api/v1/denoise`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Denoise API error: ${response.statusText}`);
       }
-    };
+
+      const denoisedBlob = await response.blob();
+      setRecordedRawBlob(rawBlob);
+      setRecordedDenoisedBlob(denoisedBlob);
+      
+      setRawAudioUrl(URL.createObjectURL(rawBlob));
+      setAudioUrl(URL.createObjectURL(denoisedBlob));
+      
+    } catch (err: any) {
+      console.error('Denoise failed:', err);
+      toastError('Khử ồn thất bại. Trả về âm thanh gốc.');
+      setRecordedRawBlob(rawBlob);
+      setRecordedDenoisedBlob(rawBlob);
+      setRawAudioUrl(URL.createObjectURL(rawBlob));
+      setAudioUrl(URL.createObjectURL(rawBlob));
+    } finally {
+      setIsDenoising(false);
+    }
   };
 
   const startRecording = async () => {
     try {
-      setRecordedBlob(null);
+      setRecordedDenoisedBlob(null);
+      setRecordedRawBlob(null);
       setAudioUrl(null);
+      setRawAudioUrl(null);
       audioChunksRef.current = [];
 
-      const stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints(noiseLevel));
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: false, 
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000
+        }
+      });
+      
       streamRef.current = stream;
       setActiveStream(stream);
 
-      let recordStream = stream;
-
-      // Web Audio DSP Graph theo 5 nấc khử ồn
-      if (noiseLevel > 0) {
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        const audioCtx = new AudioCtx();
-        audioContextRef.current = audioCtx;
-
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
-        }
-
-        const sourceNode = audioCtx.createMediaStreamSource(stream);
-        const destination = audioCtx.createMediaStreamDestination();
-
-        const highPassCutoff = noiseLevel === 1 ? 60 : noiseLevel === 2 ? 80 : 100;
-        const highPassQ = noiseLevel >= 3 ? 0.707 : 0.5;
-
-        const highPassFilter = audioCtx.createBiquadFilter();
-        highPassFilter.type = 'highpass';
-        highPassFilter.frequency.value = highPassCutoff;
-        highPassFilter.Q.value = highPassQ;
-
-        if (noiseLevel === 1 || noiseLevel === 2) {
-          sourceNode.connect(highPassFilter);
-          highPassFilter.connect(destination);
-        } else if (noiseLevel === 3) {
-          const rnnoiseNode = await createRnnoiseNode(audioCtx);
-          if (rnnoiseNode) {
-            sourceNode.connect(rnnoiseNode);
-            rnnoiseNode.connect(highPassFilter);
-          } else {
-            sourceNode.connect(highPassFilter);
-          }
-          highPassFilter.connect(destination);
-        } else if (noiseLevel === 4) {
-          const rnnoiseNode = await createRnnoiseNode(audioCtx);
-          const compressor = audioCtx.createDynamicsCompressor();
-          compressor.threshold.value = -18;
-          compressor.knee.value = 20;
-          compressor.ratio.value = 4;
-          compressor.attack.value = 0.003;
-          compressor.release.value = 0.15;
-
-          if (rnnoiseNode) {
-            sourceNode.connect(rnnoiseNode);
-            rnnoiseNode.connect(highPassFilter);
-          } else {
-            sourceNode.connect(highPassFilter);
-          }
-          highPassFilter.connect(compressor);
-          compressor.connect(destination);
-        }
-
-        if (destination.stream && destination.stream.getAudioTracks().length > 0) {
-          recordStream = destination.stream;
-        }
-      }
-
-      // Choose mime type
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/mp4';
-
-      const mediaRecorder = new MediaRecorder(recordStream, { mimeType, audioBitsPerSecond: 128000 });
+      const mimeType = 'audio/webm';
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -217,12 +168,19 @@ export default function TeacherRecordSampleModal({
         }
       };
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: mimeType });
-        setRecordedBlob(blob);
-        const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
+      mediaRecorder.onstop = async () => {
+        const rawBlob = new Blob(audioChunksRef.current, { type: mimeType });
         stopAllStreams();
+
+        if (noiseLevel === 0) {
+          setRecordedRawBlob(rawBlob);
+          setRecordedDenoisedBlob(rawBlob);
+          const url = URL.createObjectURL(rawBlob);
+          setRawAudioUrl(url);
+          setAudioUrl(url);
+        } else {
+          await processDenoiseBackend(rawBlob);
+        }
       };
 
       mediaRecorder.start(100);
@@ -241,8 +199,8 @@ export default function TeacherRecordSampleModal({
   };
 
   const handleApply = () => {
-    if (recordedBlob && audioUrl) {
-      onApply(recordedBlob, audioUrl);
+    if (recordedDenoisedBlob && audioUrl) {
+      onApply(recordedDenoisedBlob, recordedRawBlob || undefined);
       onClose();
     }
   };
@@ -295,7 +253,7 @@ export default function TeacherRecordSampleModal({
         </div>
 
         {/* Noise Reduction Slider */}
-        {!isRecording && !recordedBlob && (
+        {!isRecording && !recordedDenoisedBlob && !isDenoising && (
           <NoiseReductionSlider
             value={noiseLevel}
             onChange={(lvl) => setNoiseLevel(lvl)}
@@ -317,24 +275,32 @@ export default function TeacherRecordSampleModal({
                   {formatTimer(recordingSeconds)}
                 </span>
               </div>
-              <AudioLevelMeter stream={activeStream} isRecording={isRecording} />
+              <AudioLevelMeter stream={activeStream} />
+            </div>
+          )}
+
+          {/* Processing State */}
+          {isDenoising && (
+            <div className="flex flex-col items-center gap-4 w-full py-6">
+              <div className="w-10 h-10 border-4 border-lime-500/20 border-t-lime-500 rounded-full animate-spin"></div>
+              <span className="text-gray-400 font-medium text-sm">Đang khử ồn AI...</span>
             </div>
           )}
 
           {/* Player after recording */}
-          {!isRecording && audioUrl && (
+          {!isRecording && audioUrl && !isDenoising && (
             <div className="space-y-2">
               <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
                 <Volume2 className="w-4 h-4 text-lime-400" />
                 Nghe lại bản thu mẫu của bạn:
               </span>
-              <DarkAudioPlayer audioUrl={audioUrl} />
+              <DarkAudioPlayer audioUrl={audioUrl} rawAudioUrl={rawAudioUrl || undefined} />
             </div>
           )}
 
           {/* Action Buttons */}
           <div className="flex items-center justify-center gap-3 pt-2">
-            {!isRecording && !recordedBlob && (
+            {!isRecording && !recordedDenoisedBlob && !isDenoising && (
               <button
                 type="button"
                 onClick={startRecording}
@@ -356,7 +322,7 @@ export default function TeacherRecordSampleModal({
               </button>
             )}
 
-            {!isRecording && recordedBlob && (
+            {!isRecording && recordedDenoisedBlob && !isDenoising && (
               <div className="flex items-center gap-3 w-full">
                 <button
                   type="button"
@@ -370,10 +336,10 @@ export default function TeacherRecordSampleModal({
                 <button
                   type="button"
                   onClick={handleApply}
-                  className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-xs sm:text-sm transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                  className="flex-1 py-3 px-4 bg-gradient-to-r from-lime-400 to-green-500 hover:from-lime-300 hover:to-green-400 text-gray-950 font-black rounded-2xl shadow-xl shadow-lime-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 text-xs sm:text-sm"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Áp dụng audio này</span>
+                  <span>Dùng bản thu này</span>
                 </button>
               </div>
             )}

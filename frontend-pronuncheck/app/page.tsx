@@ -10,7 +10,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { db } from '@/app/firebase';
 
 export default function RootPage() {
-  const { user, userRole, loading, logout } = useAuth();
+  const { user, userRole, loading, logout, setUserRole } = useAuth();
   const { t } = useLanguage();
   const router = useRouter();
 
@@ -46,7 +46,8 @@ export default function RootPage() {
         email: user.email,
         role: role
       }, { merge: true });
-      window.location.reload();
+      setUserRole(role);
+      router.push(role === 'teacher' ? '/teacher' : '/student');
     };
 
     return (

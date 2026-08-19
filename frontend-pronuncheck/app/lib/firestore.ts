@@ -57,6 +57,8 @@ export interface AssignmentData {
   enableSampleAudio?: boolean;
   sampleAudioType?: 'tts' | 'teacher_record';
   sampleAudioUrl?: string;
+  sampleRawAudioUrl?: string;
+  rawAudioUrl?: string;
   sampleAudioStoragePath?: string;
   createdAt?: any;
 }
@@ -70,6 +72,7 @@ export interface SubmissionData {
   word: string;
   targetPhoneme?: string;
   audioUrl?: string;
+  rawAudioUrl?: string;
   audioStoragePath?: string;
   scores?: {
     phoneme_score?: number;

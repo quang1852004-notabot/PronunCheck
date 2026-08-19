@@ -77,3 +77,45 @@ export async function getAudioUrl(storagePathOrUrl: string): Promise<string> {
   const storageRef = ref(storage, storagePathOrUrl);
   return await getDownloadURL(storageRef);
 }
+
+export interface UploadDualAudioParams {
+  classId: string;
+  assignmentId: string;
+  studentId: string;
+  denoisedBlob: Blob;
+  rawBlob?: Blob | null;
+}
+
+export interface UploadDualAudioResult {
+  denoisedUrl: string;
+  rawUrl?: string;
+}
+
+export async function uploadDualAudio(params: UploadDualAudioParams): Promise<UploadDualAudioResult> {
+  const timestamp = Date.now();
+  
+  // Resolve extensions
+  let dExt = 'wav';
+  if (params.denoisedBlob instanceof File && params.denoisedBlob.name) {
+    dExt = params.denoisedBlob.name.split('.').pop() || 'wav';
+  }
+  
+  const denoisedPath = `classes/${params.classId}/assignments/${params.assignmentId}/${params.studentId}_${timestamp}_denoised.${dExt}`;
+  const denoisedRef = ref(storage, denoisedPath);
+  await uploadBytes(denoisedRef, params.denoisedBlob);
+  const denoisedUrl = await getDownloadURL(denoisedRef);
+
+  let rawUrl;
+  if (params.rawBlob) {
+    let rExt = 'wav';
+    if (params.rawBlob instanceof File && params.rawBlob.name) {
+      rExt = params.rawBlob.name.split('.').pop() || 'wav';
+    }
+    const rawPath = `classes/${params.classId}/assignments/${params.assignmentId}/${params.studentId}_${timestamp}_raw.${rExt}`;
+    const rawRef = ref(storage, rawPath);
+    await uploadBytes(rawRef, params.rawBlob);
+    rawUrl = await getDownloadURL(rawRef);
+  }
+
+  return { denoisedUrl, rawUrl };
+}

@@ -20,7 +20,7 @@ import {
   joinClass,
   SubmissionData
 } from '@/app/lib/firestore';
-import { uploadAudio } from '@/app/lib/storage';
+import { uploadAudio, uploadDualAudio } from '@/app/lib/storage';
 import { getGoogleTtsUrl } from '@/app/lib/tts';
 import { ArrowLeft, BookOpen, KeyRound, CheckCircle2, XCircle, ChevronDown, Volume2 } from 'lucide-react';
 import { useClassData, useClassMembership, useStudentAssignmentsWithSubmissions } from '@/app/lib/hooks';
@@ -61,6 +61,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     charScores?: CharScoreItem[];
     worstChar?: WorstCharItem;
     audioUrl?: string;
+    rawAudioUrl?: string;
     scores?: {
       phoneme_score?: number;
       dtw_score?: number;
@@ -99,7 +100,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     }
   };
 
-  const handleAudioReady = async (assignmentId: string, expectedWord: string, targetPhoneme: string, blob: Blob) => {
+  const handleAudioReady = async (assignmentId: string, expectedWord: string, targetPhoneme: string, denoisedBlob: Blob, rawBlob?: Blob) => {
     if (!user || !classData) return;
     
     setSubmittingId(assignmentId);
@@ -118,18 +119,19 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
         return;
       }
 
-      // 1. Upload audio to Firebase Storage
-      const { storagePath, downloadUrl } = await uploadAudio({
+      // 1. Upload audio to Firebase Storage (Dual Storage)
+      const { denoisedUrl, rawUrl } = await uploadDualAudio({
         classId,
         assignmentId,
         studentId: user.uid,
-        blob
+        denoisedBlob,
+        rawBlob
       });
 
       // 2. Send to AI API
       const formData = new FormData();
-      const filename = blob instanceof File ? blob.name : 'recording.webm';
-      formData.append('audio_file', blob, filename);
+      const filename = denoisedBlob instanceof File ? denoisedBlob.name : 'recording.webm';
+      formData.append('audio_file', denoisedBlob, filename);
       formData.append('expected_word', expectedWord);
       formData.append('target_phoneme', targetPhoneme);
 
@@ -231,8 +233,9 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
         word: expectedWord,
         targetPhoneme,
         attemptNumber: subs.length + 1,
-        audioUrl: downloadUrl,
-        audioStoragePath: storagePath,
+        audioUrl: denoisedUrl,
+        rawAudioUrl: rawUrl,
+        audioStoragePath: '', 
         isPassed: Boolean(assessment.is_passed),
         scores: {
           phoneme_score: phonemeScore,
@@ -252,7 +255,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
         feedback: assessment.feedback || '',
         charScores,
         worstChar,
-        audioUrl: downloadUrl,
+        audioUrl: denoisedUrl,
+        rawAudioUrl: rawUrl,
         scores: {
           phoneme_score: phonemeScore,
           dtw_score: dtwScore,
@@ -432,6 +436,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                       const displayWorstChar = activeViewSub?.worstChar || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.worstChar : undefined);
                       const displayFeedback = activeViewSub?.feedback || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.feedback : undefined);
                       const displayAudioUrl = activeViewSub?.audioUrl || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.audioUrl : undefined);
+                      const displayRawAudioUrl = activeViewSub?.rawAudioUrl || (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.rawAudioUrl : undefined);
                       const displayIsPassed = activeViewSub ? activeViewSub.isPassed : (assessmentResult && activeAssignmentId === assignment.id ? assessmentResult.passed : assignment.isPassed);
 
                       return (
@@ -513,7 +518,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                               ) : (
                                 <div className="space-y-4">
                                   <AudioRecorder 
-                                    onAudioReady={(blob) => handleAudioReady(assignment.id || '', assignment.word, assignment.targetPhoneme, blob)}
+                                    onAudioReady={(denoisedBlob, rawBlob) => handleAudioReady(assignment.id || '', assignment.word, assignment.targetPhoneme, denoisedBlob, rawBlob)}
                                     disabled={submittingId === assignment.id}
                                   />
                                   
@@ -566,6 +571,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                                   {displayAudioUrl && (
                                     <DarkAudioPlayer
                                       audioUrl={displayAudioUrl}
+                                      rawAudioUrl={displayRawAudioUrl}
                                       onTimeUpdate={(cTime, dur) => {
                                         setKaraokeCurrentTime(cTime);
                                         setKaraokeDuration(dur);
