@@ -183,8 +183,14 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       formData.append('expected_word', expectedWord);
       formData.append('target_phoneme', targetPhoneme);
 
-      // Prioritize Assignment-level scoring config over Class-level scoring config
-      const effectiveConfig = assignment?.scoringConfig || classData.scoringConfig;
+      // Prioritize Assignment-level scoring config, fallback to default standard config
+      const effectiveConfig = assignment?.scoringConfig || {
+        threshold: 0.6,
+        passing_threshold: 0.6,
+        mode: 'auto',
+        L0: 4.5,
+        k: 0.85
+      };
       if (effectiveConfig) {
         const thresholdVal = effectiveConfig.threshold ?? effectiveConfig.passing_threshold;
         if (thresholdVal !== undefined) {

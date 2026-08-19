@@ -34,7 +34,6 @@ import DarkAudioPlayer from '@/app/components/DarkAudioPlayer';
 interface AssignmentModalProps {
   classId: string;
   assignment?: AssignmentData | null; // If provided, edit mode; otherwise create mode
-  classDefaultConfig?: ScoringConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -57,7 +56,6 @@ function getInitialDeadline(deadline: unknown): string {
 export default function AssignmentModal({
   classId,
   assignment,
-  classDefaultConfig,
   isOpen,
   onClose,
   onSaved
@@ -85,8 +83,7 @@ export default function AssignmentModal({
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [isPlayingTts, setIsPlayingTts] = useState(false);
 
-  // Scoring Config State
-  const [useCustomScoring, setUseCustomScoring] = useState(false);
+  // Scoring Config State (Per Assignment - Default Auto with 60% threshold)
   const [scoringMode, setScoringMode] = useState<'auto' | 'manual'>('auto');
   const [threshold, setThreshold] = useState<number>(0.6);
   const [L0, setL0] = useState<number>(4.5);
@@ -126,17 +123,15 @@ export default function AssignmentModal({
         setTeacherAudioBlob(null);
 
         if (assignment.scoringConfig) {
-          setUseCustomScoring(true);
           setScoringMode(assignment.scoringConfig.mode || 'auto');
           setThreshold(assignment.scoringConfig.threshold ?? 0.6);
           setL0(assignment.scoringConfig.L0 ?? 4.5);
           setK(assignment.scoringConfig.k ?? 0.85);
         } else {
-          setUseCustomScoring(false);
-          setScoringMode(classDefaultConfig?.mode || 'auto');
-          setThreshold(classDefaultConfig?.threshold ?? 0.6);
-          setL0(classDefaultConfig?.L0 ?? 4.5);
-          setK(classDefaultConfig?.k ?? 0.85);
+          setScoringMode('auto');
+          setThreshold(0.6);
+          setL0(4.5);
+          setK(0.85);
         }
       } else {
         // Create mode
@@ -152,14 +147,13 @@ export default function AssignmentModal({
         setTeacherAudioBlob(null);
         setTeacherAudioUrl(null);
 
-        setUseCustomScoring(false);
-        setScoringMode(classDefaultConfig?.mode || 'auto');
-        setThreshold(classDefaultConfig?.threshold ?? 0.6);
-        setL0(classDefaultConfig?.L0 ?? 4.5);
-        setK(classDefaultConfig?.k ?? 0.85);
+        setScoringMode('auto');
+        setThreshold(0.6);
+        setL0(4.5);
+        setK(0.85);
       }
     }
-  }, [isOpen, assignment, classDefaultConfig]);
+  }, [isOpen, assignment]);
 
   // Handle Play TTS Preview
   const handleTestTts = async () => {
@@ -202,8 +196,8 @@ export default function AssignmentModal({
         finalStoragePath = uploadRes.storagePath;
       }
 
-      // 2. Build Scoring Config payload if custom
-      const finalScoringConfig: ScoringConfig | undefined = useCustomScoring ? {
+      // 2. Build Scoring Config payload for this assignment
+      const finalScoringConfig: ScoringConfig = {
         threshold,
         passing_threshold: threshold,
         mode: scoringMode,
@@ -211,7 +205,7 @@ export default function AssignmentModal({
         k,
         w1: 0.5,
         w2: 0.5
-      } : undefined;
+      };
 
       const payload = {
         title: title.trim() || undefined,
@@ -522,48 +516,19 @@ export default function AssignmentModal({
             {/* TAB 2: Scoring Config for this Assignment */}
             {activeSubTab === 'scoring' && (
               <div className="space-y-5 animate-in fade-in duration-150">
-                {/* Switcher: Inherit vs Custom */}
-                <div className="p-4 bg-gray-950/90 rounded-2xl border border-gray-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                        <Sliders className="w-4 h-4 text-purple-400" />
-                        <span>Cấu hình Chấm điểm cho Bài tập này</span>
-                      </h4>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        Tùy chỉnh riêng thuật toán chấm cho bài này hoặc kế thừa cấu hình chung của lớp.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 p-1 bg-gray-900 rounded-xl border border-gray-800">
-                      <button
-                        type="button"
-                        onClick={() => setUseCustomScoring(false)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                          !useCustomScoring
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-gray-400 hover:text-white'
-                        }`}
-                      >
-                        Kế thừa lớp
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setUseCustomScoring(true)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                          useCustomScoring
-                            ? 'bg-purple-600 text-white shadow-sm'
-                            : 'text-gray-400 hover:text-white'
-                        }`}
-                      >
-                        Tùy chỉnh riêng
-                      </button>
-                    </div>
-                  </div>
+                {/* Header Information */}
+                <div className="p-4 bg-gray-950/90 rounded-2xl border border-gray-800">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-purple-400" />
+                    <span>Cấu hình Chấm điểm AI cho Bài tập này</span>
+                  </h4>
+                  <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                    Hệ thống sẽ áp dụng thuật toán chấm điểm này riêng biệt cho bài tập <strong className="text-lime-400 font-mono font-bold">{word || '(chưa nhập từ)'}</strong>.
+                  </p>
                 </div>
 
-                {/* Custom Scoring Sliders & Details */}
-                <div className={`space-y-4 transition-opacity ${useCustomScoring ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                {/* Scoring Sliders & Details */}
+                <div className="space-y-4">
                   {/* Mode Buttons */}
                   <div className="flex items-center justify-between p-4 bg-gray-950/80 rounded-2xl border border-gray-800">
                     <span className="text-xs font-bold text-gray-200">Chế độ phân bổ trọng số:</span>

@@ -74,8 +74,7 @@ export default function TeacherDashboard() {
         className: name,
         password,
         teacherId: user.uid,
-        teacherEmail: user.email || '',
-        scoringConfig: { threshold: 0.6, w1: 0.4, w2: 0.6 }
+        teacherEmail: user.email || ''
       }, classId);
       
       form.reset();

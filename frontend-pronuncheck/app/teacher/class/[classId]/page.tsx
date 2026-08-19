@@ -14,9 +14,6 @@ import {
   ClassData, 
   AssignmentData, 
   SubmissionData 
-} from '@/app/lib/firestore';
-import { useRouter } from 'next/navigation';
-import ScoringConfigComponent from '@/app/teacher/components/ScoringConfig';
 import SubmissionTable from '@/app/teacher/components/SubmissionTable';
 import ClassManagement from '@/app/teacher/components/ClassManagement';
 import AssignmentModal from '@/app/teacher/components/AssignmentModal';
@@ -46,7 +43,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
   const [assignments, setAssignments] = useState<AssignmentData[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'assignments' | 'config' | 'submissions' | 'management'>('assignments');
+  const [activeTab, setActiveTab] = useState<'assignments' | 'submissions' | 'management'>('assignments');
   const [copied, setCopied] = useState(false);
 
   // Assignment Modal & Delete states
@@ -186,18 +183,6 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
               >
                 <BookOpen className="w-4 h-4" />
                 {t('tab.assignments')} ({assignments.length})
-              </button>
-
-              <button
-                onClick={() => setActiveTab('config')}
-                className={`py-3 px-4 sm:px-6 font-bold text-xs sm:text-sm rounded-t-2xl transition-all flex items-center gap-2 cursor-pointer ${
-                  activeTab === 'config'
-                    ? 'border-b-2 border-blue-500 text-blue-400 bg-gray-800/80 shadow-sm'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/40'
-                }`}
-              >
-                <Sliders className="w-4 h-4" />
-                {t('tab.scoring_config')}
               </button>
 
               <button
@@ -385,18 +370,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
             </div>
           </div>
 
-          {/* Tab 2: Scoring Config */}
-          <div className={activeTab === 'config' ? 'animate-in fade-in duration-200' : 'hidden'}>
-            <ScoringConfigComponent 
-              classId={classId} 
-              initialConfig={classData?.scoringConfig} 
-              onSaved={(newConfig) => {
-                setClassData(prev => prev ? { ...prev, scoringConfig: newConfig } : null);
-              }}
-            />
-          </div>
-
-          {/* Tab 3: Submissions Table */}
+          {/* Tab 2: Submissions Table */}
           <div className={activeTab === 'submissions' ? 'animate-in fade-in duration-200' : 'hidden'}>
             <SubmissionTable 
               submissions={submissions} 
@@ -406,7 +380,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
             />
           </div>
 
-          {/* Tab 4: Class Management */}
+          {/* Tab 3: Class Management */}
           <div className={activeTab === 'management' ? 'animate-in fade-in duration-200' : 'hidden'}>
             {classData && (
               <ClassManagement
@@ -424,7 +398,6 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
         <AssignmentModal
           classId={classId}
           assignment={selectedAssignment}
-          classDefaultConfig={classData?.scoringConfig}
           isOpen={isAssignmentModalOpen}
           onClose={() => {
             setIsAssignmentModalOpen(false);
