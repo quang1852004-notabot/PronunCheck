@@ -68,7 +68,7 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
     const newStatus = !assignment.isActive;
     try {
       await updateAssignment(classId, assignment.id, { isActive: newStatus });
-      setAssignments(prev => prev.map(a => a.id === assignment.id ? { ...a, isActive: newStatus } : a));
+      await mutateAssignments();
       success(newStatus ? 'Đã mở bài tập' : 'Đã đóng bài tập');
     } catch (error) {
       console.error('Error toggling assignment status:', error);
@@ -82,9 +82,9 @@ export default function ClassDetail({ params }: { params: Promise<{ classId: str
     try {
       const { deleteAssignmentWithSubmissions } = await import('@/app/lib/firestore');
       await deleteAssignmentWithSubmissions(classId, deletingAssignment.id, deleteSubmissions);
-      setAssignments(prev => prev.filter(a => a.id !== deletingAssignment.id));
+      await mutateAssignments();
       if (deleteSubmissions) {
-        setSubmissions(prev => prev.filter(s => s.assignmentId !== deletingAssignment.id));
+        await mutateSubmissions();
       }
       setDeletingAssignment(null);
       success(t('assignment.deleted_success'));

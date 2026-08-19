@@ -90,7 +90,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       await joinClass(classId, user.uid, user.email || '');
       success(t('student.join_success'));
       setPasswordInput('');
-      await loadData();
+      await Promise.all([mutateClass(), mutateMembership(), mutateAssignments()]);
     } catch (err: any) {
       console.error(err);
       toastError(err.message || 'Lỗi khi tham gia lớp học.');
@@ -109,8 +109,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
     const startTime = startAiTimer(`class-assess-${assignmentId}`);
 
     try {
-      const subs = await getSubmissionsByStudent(classId, user.uid, assignmentId);
       const assignment = assignments.find(a => a.id === assignmentId);
+      const subs = assignment?.submissions || [];
       const maxAttempts = assignment?.maxAttempts || 1;
 
       if (subs.length >= maxAttempts) {
@@ -268,7 +268,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
       }
 
       // Reload assignments to refresh attempts count and history
-      await loadData();
+      await mutateAssignments();
 
     } catch (err: any) {
       captureAppError(err, { classId, assignmentId, expectedWord });

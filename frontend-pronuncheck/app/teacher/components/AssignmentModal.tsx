@@ -66,6 +66,8 @@ export default function AssignmentModal({
 
   // Active Sub-Tab: 'basic' | 'scoring'
   const [activeSubTab, setActiveSubTab] = useState<'basic' | 'scoring'>('basic');
+  const [loading, setLoading] = useState(false);
+  const useCustomScoring = assignment?.scoringConfig !== undefined;
 
   // Basic Info Form State
   const [title, setTitle] = useState('');
