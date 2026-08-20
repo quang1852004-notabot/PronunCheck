@@ -360,7 +360,7 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
           <DarkAudioPlayer audioUrl={audioUrl} rawAudioUrl={rawAudioUrl || undefined} />
 
           {/* Bottom Action Buttons */}
-          <div className="flex items-center gap-3 w-full justify-end">
+          <div className="flex flex-wrap items-center gap-3 w-full justify-end">
             <button
               type="button"
               onClick={resetRecording}

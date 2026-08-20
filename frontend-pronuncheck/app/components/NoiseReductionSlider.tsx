@@ -137,7 +137,7 @@ export default function NoiseReductionSlider({
         />
 
         {/* Step Ticks (0, 1, 2, 3, 4) */}
-        <div className="flex justify-between items-center text-[10px] font-bold text-gray-500 px-0.5 pt-0.5">
+        <div className="flex justify-between items-center text-[10px] font-bold text-gray-500 px-1.5 pt-0.5">
           {[0, 1, 2, 3, 4].map((step) => {
             const isSelected = step === value;
             return (

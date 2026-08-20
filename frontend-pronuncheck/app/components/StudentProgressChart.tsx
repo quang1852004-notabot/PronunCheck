@@ -246,10 +246,25 @@ export default function StudentProgressChart({
   expectedWord
 }: StudentProgressChartProps) {
   const { t } = useLanguage();
+  const [filterStatus, setFilterStatus] = useState<'all' | 'passed' | 'failed'>('all');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+
   if (!submissions || submissions.length === 0) return null;
 
-  // Sort ascending by attemptNumber
+  // Sort ascending by attemptNumber for the chart points
   const sorted = [...submissions].sort((a, b) => (a.attemptNumber || 1) - (b.attemptNumber || 1));
+
+  // Compute display history based on filters
+  const displayHistory = [...sorted]
+    .filter((s) => {
+      if (filterStatus === 'passed') return s.isPassed;
+      if (filterStatus === 'failed') return !s.isPassed;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortOrder === 'newest') return (b.attemptNumber || 1) - (a.attemptNumber || 1);
+      return (a.attemptNumber || 1) - (b.attemptNumber || 1);
+    });
 
   // Calculate scores list
   const attemptsData = sorted.map((s, idx) => {
@@ -390,13 +405,36 @@ export default function StudentProgressChart({
 
       {/* Accordion List for Each Attempt */}
       <div className="space-y-3">
-        <h4 className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
-          <Clock className="w-3.5 h-3.5 text-gray-400" />
-          <span>Attempts History (Click to expand Playback &amp; Karaoke):</span>
-        </h4>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-900/50 p-2.5 rounded-xl border border-gray-800">
+          <h4 className="text-xs font-bold text-gray-300 flex items-center gap-1.5 px-1">
+            <Clock className="w-3.5 h-3.5 text-gray-400" />
+            <span>Attempts History:</span>
+          </h4>
+          
+          <div className="flex items-center gap-2 text-xs">
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as any)}
+              className="bg-gray-950 border border-gray-700 text-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-indigo-500"
+            >
+              <option value="all">Tất cả</option>
+              <option value="passed">Đạt</option>
+              <option value="failed">Chưa đạt</option>
+            </select>
+
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as any)}
+              className="bg-gray-950 border border-gray-700 text-gray-300 rounded-lg px-2 py-1.5 outline-none focus:border-indigo-500"
+            >
+              <option value="newest">Mới nhất</option>
+              <option value="oldest">Cũ nhất</option>
+            </select>
+          </div>
+        </div>
 
         <div className="space-y-3">
-          {sorted.map((sub, idx) => (
+          {displayHistory.map((sub, idx) => (
             <AttemptAccordionItem
               key={sub.id || idx}
               submission={sub}
@@ -404,6 +442,9 @@ export default function StudentProgressChart({
               expectedWord={expectedWord}
             />
           ))}
+          {displayHistory.length === 0 && (
+            <div className="text-center p-4 text-xs text-gray-500 italic">Không có dữ liệu phù hợp với bộ lọc.</div>
+          )}
         </div>
       </div>
     </div>

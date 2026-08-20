@@ -103,6 +103,8 @@ export const dictionary: Record<Language, Record<string, string>> = {
     "practice.score_whisper": "Tính trọn vẹn",
     "practice.score_total": "Tổng thể",
     "practice.try_again": "Thử lại",
+    "practice.record_again": "Thu âm lại",
+    "practice.submit_audio": "Nộp bài",
 
     // Audio Recorder
     "recorder.start": "Bắt đầu ghi âm",
@@ -395,6 +397,8 @@ export const dictionary: Record<Language, Record<string, string>> = {
     "practice.score_whisper": "Completeness",
     "practice.score_total": "Overall",
     "practice.try_again": "Try Again",
+    "practice.record_again": "Record Again",
+    "practice.submit_audio": "Submit Audio",
 
     // Audio Recorder
     "recorder.start": "Start Recording",

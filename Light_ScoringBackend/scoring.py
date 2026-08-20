@@ -77,32 +77,68 @@ except ImportError:
 # ==============================================================================
 # 0. TIỀN XỬ LÝ KHỬ NHIỄU & TRỪ NỀN TẠP ÂM (SPECTRAL GATING DENOISER)
 # ==============================================================================
-def preprocess_denoise_audio(audio_array: np.ndarray, sr: int = 16000) -> np.ndarray:
+def highpass_filter(data, cutoff, fs, order=5):
+    if cutoff == 0:
+        return data
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='high', analog=False)
+    y = filtfilt(b, a, data)
+    return y
+
+def apply_5_level_denoise(audio_array: np.ndarray, sr: int = 16000, level: int = 1) -> np.ndarray:
     """
-    Áp dụng Spectral Gating tự động ước tính phổ tạp âm (noise profile) và trừ nền:
-      - Khử 15-20dB tiếng ồn quán cafe, tiếng nhạc nền, tiếng xì micro và tiếng quạt.
-      - prop_decrease=0.75: Giảm đáng kể nhiễu mà bảo toàn 100% formant và âm gió (/s/, /ʃ/, /ç/, /x/).
+    Áp dụng thuật toán khử ồn theo 5 nấc (0 đến 4).
+    Do giới hạn trình biên dịch Rust (không cài được DeepFilterNet), chúng ta sử dụng
+    thuật toán Spectral Gating cao cấp của noisereduce kết hợp High-Pass Filter để
+    mô phỏng kỹ thuật Dry/Wet Mix và tạo ra 5 nấc độ sâu:
+    - Nấc 0: Giữ nguyên gốc
+    - Nấc 1: HighPass 60Hz (cắt tiếng ù)
+    - Nấc 2: HighPass 80Hz + Giảm nhiễu nền tĩnh 40% (Giữ ấm giọng)
+    - Nấc 3: HighPass 100Hz + Giảm nhiễu mạnh 75% tĩnh & động (Quán cafe)
+    - Nấc 4: HighPass 100Hz + Giảm nhiễu cực đoan 95% + Ép dải âm (Extreme)
     """
     if audio_array is None or len(audio_array) < int(sr * 0.2):
         return audio_array
         
-    if nr is None:
+    level = max(0, min(4, int(level)))
+    if level == 0:
         return audio_array
         
+    y = audio_array.copy()
+    
+    # 1. High-Pass Filter
+    cutoff = {1: 60, 2: 80, 3: 100, 4: 100}.get(level, 0)
+    if cutoff > 0:
+        y = highpass_filter(y, cutoff, sr)
+        
+    if level == 1 or nr is None:
+        return y
+        
+    # 2. Denoise parameters based on level
+    prop_decrease = {2: 0.40, 3: 0.75, 4: 0.95}.get(level, 0.0)
+    stationary = True if level == 2 else False
+    
     try:
-        # Áp dụng Spectral Gating êm dịu: Khử ồn nền mà bảo toàn 100% hài âm tự nhiên của giọng nói
-        cleaned = nr.reduce_noise(
-            y=audio_array,
+        y = nr.reduce_noise(
+            y=y,
             sr=sr,
-            prop_decrease=0.40,
-            stationary=True,
-            n_fft=1024,
-            hop_length=256
+            prop_decrease=prop_decrease,
+            stationary=stationary,
+            n_fft=1024 if level <= 3 else 2048,
+            hop_length=256 if level <= 3 else 512
         )
-        return cleaned.astype(np.float32)
+        
+        # Nấc 4: Thêm compressor đơn giản (Soft Clipping) để ép dải động
+        if level == 4:
+            # Tăng gain 20% và soft clip
+            y = y * 1.2
+            y = np.tanh(y)
+            
+        return y.astype(np.float32)
     except Exception as e:
-        print(f"Spectral Gating Denoise Warning: {e}", flush=True)
-        return audio_array
+        print(f"[Denoise] Error applying noise reduction: {e}")
+        return y
 
 
 # ==============================================================================
@@ -343,13 +379,26 @@ def analyze_precise_score(
     w2v_model,
     w2v_processor,
     vocab_dict: Dict[str, int]
-) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Phân tích độ chuẩn xác từng âm vị/ký tự qua Wav2Vec2 CTC Forced Alignment,
     đồng thời áp dụng bộ luật ngữ âm tiếng Đức (Auslautverhärtung, Vowel Duration, Ich/Ach-Laut).
+    Trả về: (avg_gop, char_scores, worst_char_info, word_timestamps)
     """
+    raw_words = expected_word.strip().split()
+    fallback_word_timestamps = []
+    if raw_words and len(audio_array) > 0:
+        total_duration = round(len(audio_array) / 16000.0, 2)
+        step = total_duration / max(1, len(raw_words))
+        for idx, rw in enumerate(raw_words):
+            fallback_word_timestamps.append({
+                "word": rw,
+                "start": round(idx * step, 2),
+                "end": round((idx + 1) * step, 2)
+            })
+
     if not w2v_model or not w2v_processor or not vocab_dict:
-        return 0.5, [], None
+        return 0.5, [], None, fallback_word_timestamps
         
     try:
         # Chuẩn bị input cho Wav2Vec2
@@ -371,7 +420,7 @@ def analyze_precise_score(
                 chars_list.append(char)
                 
         if not tokens:
-            return 0.5, [], None
+            return 0.5, [], None, fallback_word_timestamps
 
         targets = torch.tensor([tokens], dtype=torch.int32)
         blank_id = w2v_processor.tokenizer.pad_token_id
@@ -421,6 +470,8 @@ def analyze_precise_score(
             })
             
         char_scores = []
+        word_timestamps = []
+        
         if len(token_spans) == len(chars_list):
             for i, span in enumerate(token_spans):
                 c = chars_list[i]
@@ -455,25 +506,68 @@ def analyze_precise_score(
                     
                     final_char_score = float(np.clip(raw_score * duration_mult, 0.05, 1.0))
                     
+                    start_sec = round(span["start"] * 0.02, 3)
+                    end_sec = round((span["end"] + 1) * 0.02, 3)
+                    
                     char_scores.append({
                         "char": c,
                         "score": round(final_char_score, 3),
                         "actual": actual_c,
                         "duration_frames": span_frames,
                         "duration_multiplier": duration_mult,
-                        "duration_feedback": duration_msg if duration_mult < 1.0 else None
+                        "duration_feedback": duration_msg if duration_mult < 1.0 else None,
+                        "start_time": start_sec,
+                        "end_time": end_sec
                     })
+
+            # Trích xuất Word-level Timestamps cho Karaoke Visualizer
+            current_word_chars = []
+            current_spans = []
+            
+            for i, span in enumerate(token_spans):
+                c = chars_list[i]
+                if c == ' ' or c == '|':
+                    if current_word_chars and current_spans:
+                        w_start = round(current_spans[0]["start"] * 0.02, 2)
+                        w_end = round((current_spans[-1]["end"] + 1) * 0.02, 2)
+                        word_timestamps.append({
+                            "word": "".join(current_word_chars),
+                            "start": w_start,
+                            "end": max(w_end, round(w_start + 0.05, 2))
+                        })
+                        current_word_chars = []
+                        current_spans = []
+                else:
+                    current_word_chars.append(c)
+                    current_spans.append(span)
+                    
+            if current_word_chars and current_spans:
+                w_start = round(current_spans[0]["start"] * 0.02, 2)
+                w_end = round((current_spans[-1]["end"] + 1) * 0.02, 2)
+                word_timestamps.append({
+                    "word": "".join(current_word_chars),
+                    "start": w_start,
+                    "end": max(w_end, round(w_start + 0.05, 2))
+                })
+                
+            # Chuẩn hóa lại text nguyên bản của từng từ (bảo toàn Casing)
+            if len(word_timestamps) == len(raw_words):
+                for idx, rw in enumerate(raw_words):
+                    word_timestamps[idx]["word"] = rw
+                    
+        if not word_timestamps:
+            word_timestamps = fallback_word_timestamps
                     
         if not char_scores:
-            return 0.5, [], None
+            return 0.5, [], None, word_timestamps
             
         avg_gop = float(sum(x["score"] for x in char_scores) / len(char_scores))
         worst_char_info = min(char_scores, key=lambda x: x["score"])
         
-        return avg_gop, char_scores, worst_char_info
+        return avg_gop, char_scores, worst_char_info, word_timestamps
     except Exception as e:
         print(f"Forced Alignment Error: {e}", flush=True)
-        return 0.5, [], None
+        return 0.5, [], None, fallback_word_timestamps
 
 
 # ==============================================================================

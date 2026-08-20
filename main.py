@@ -21,6 +21,7 @@ import os
 import uuid
 import numpy as np
 import torch
+import soundfile as sf
 from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import traceback
@@ -166,6 +167,37 @@ def health_check():
         }
     }
 
+from fastapi.responses import FileResponse
+
+@app.post("/api/v1/denoise")
+def denoise_audio_endpoint(
+    audio_file: UploadFile = File(..., description="File âm thanh thô từ microphone"),
+    noise_level: int = Form(1, description="Mức độ khử ồn (0-4)")
+):
+    file_path = ""
+    out_path = ""
+    try:
+        file_extension = audio_file.filename.split(".")[-1].lower() if audio_file.filename else "webm"
+        temp_filename = f"{uuid.uuid4()}.{file_extension}"
+        file_path = os.path.join(config.UPLOAD_DIR, temp_filename)
+        out_path = os.path.join(config.UPLOAD_DIR, f"denoised_{uuid.uuid4()}.wav")
+        
+        with open(file_path, "wb") as buffer:
+            buffer.write(audio_file.file.read())
+            
+        audio_array = decode_audio(file_path, sampling_rate=16000)
+        
+        # Gọi hàm khử ồn 5 nấc
+        denoised_array = scoring.apply_5_level_denoise(audio_array, sr=16000, level=noise_level)
+        
+        # Lưu ra file wav
+        sf.write(out_path, denoised_array, 16000)
+        
+        return FileResponse(out_path, media_type="audio/wav", filename="denoised.wav")
+    except Exception as e:
+        print(f"Error in /denoise: {e}")
+        return {"error": str(e)}
+
 @app.post("/api/v1/assess")
 def assess_pronunciation(
     audio_file: UploadFile = File(..., description="File âm thanh ghi âm từ microphone của học sinh"),
@@ -177,13 +209,9 @@ def assess_pronunciation(
     Quy trình xử lý:
       1. Lưu file audio tạm thời vào UPLOAD_DIR với UUID ngẫu nhiên.
       2. Decode file audio về mảng numpy 1D tần số lấy mẫu 16kHz chuẩn.
-      3. Gửi đồng thời 3 tác vụ tính điểm vào ThreadPoolExecutor (non-blocking):
-         - analyze_precise_score (Wav2Vec2 CTC alignment + German phonetics)
-         - analyze_with_whisperx (Whisper Tiny ASR + robust text normalization)
-         - calculate_dtw_score (F0 Pitch DTW intonation matching)
+      3. Gửi đồng thời 3 tác vụ tính điểm vào ThreadPoolExecutor (non-blocking).
       4. Chờ cả 3 tác vụ hoàn thành (.result()).
       5. Gọi hàm calculate_dynamic_score với công thức trọng số Sigmoid động tuyến tính.
-      6. Khối `finally` đảm bảo xóa file audio tạm để giải phóng ổ cứng.
     """
     file_path = ""
     try:
@@ -197,9 +225,6 @@ def assess_pronunciation(
 
         # 2. Giải mã âm thanh thành mảng float32 16kHz
         audio_array = decode_audio(file_path, sampling_rate=16000)
-
-        # 2.1. Tiền xử lý khử nhiễu & trừ nền tạp âm Spectral Gating (quán cafe, tiếng nhạc, quạt gió)
-        audio_array = scoring.preprocess_denoise_audio(audio_array, sr=16000)
 
         # Ghi nhận Sentry Breadcrumb cho lượt chấm điểm AI
         sentry_sdk.add_breadcrumb(
@@ -228,7 +253,7 @@ def assess_pronunciation(
         )
 
         # 4. Thu thập kết quả từ 3 tác vụ
-        precise_score, char_scores, worst_char = future_precise.result()
+        precise_score, char_scores, worst_char, word_timestamps = future_precise.result()
         whisper_score = future_whisper.result()
         dtw_score = future_dtw.result()
 
@@ -247,6 +272,7 @@ def assess_pronunciation(
             "status": "success",
             "word": expected_word,
             "char_scores": char_scores,
+            "word_timestamps": word_timestamps,
             "assessment": assessment_result
         })
 

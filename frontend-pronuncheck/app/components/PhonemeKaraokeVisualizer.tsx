@@ -4,9 +4,16 @@ import React, { useState, useMemo } from 'react';
 import { X, CheckCircle2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { CharScoreItem } from './PhonemeDiagnosticCard';
 
+export interface WordTimestampItem {
+  word: string;
+  start: number;
+  end: number;
+}
+
 interface PhonemeKaraokeVisualizerProps {
   expectedWord: string;
   charScores?: CharScoreItem[];
+  wordTimestamps?: WordTimestampItem[];
   currentTime?: number;
   duration?: number;
   isPlaying?: boolean;
@@ -23,6 +30,7 @@ interface WordEvaluation {
 export default function PhonemeKaraokeVisualizer({
   expectedWord,
   charScores,
+  wordTimestamps,
   currentTime = 0,
   duration = 0,
   isPlaying = false
@@ -31,34 +39,29 @@ export default function PhonemeKaraokeVisualizer({
 
   // Group characters into words and calculate average score for each word
   const wordsData: WordEvaluation[] = useMemo(() => {
-    const rawWords = expectedWord.trim().split(/\s+/).filter(Boolean);
-    if (rawWords.length === 0) return [];
+    const data: WordEvaluation[] = [];
+    const regex = /\S+/g;
+    let match;
 
-    let currentCharIdx = 0;
-
-    return rawWords.map((word) => {
-      const startIndex = currentCharIdx;
-      const wordChars = word.split('');
-      const charCount = wordChars.length;
+    while ((match = regex.exec(expectedWord)) !== null) {
+      const word = match[0];
+      const startIndex = match.index;
+      const endIndex = startIndex + word.length;
       
       let scoreSum = 0;
       let validCount = 0;
 
-      for (let i = 0; i < charCount; i++) {
-        if (charScores && charScores[currentCharIdx]) {
-          const rawSc = charScores[currentCharIdx].score;
+      for (let i = startIndex; i < endIndex; i++) {
+        if (charScores && charScores[i]) {
+          const rawSc = charScores[i].score;
           // Normalize to [0, 100]
           const sc100 = rawSc <= 1.0 ? rawSc * 100 : rawSc;
           scoreSum += sc100;
           validCount++;
         }
-        currentCharIdx++;
       }
 
-      // Account for space in character indexing
-      currentCharIdx++;
-
-      const avgScore = validCount > 0 ? Math.round(scoreSum / validCount) : 85;
+      const avgScore = validCount > 0 ? Math.round(scoreSum / validCount) : 100;
       let status: 'good' | 'medium' | 'bad' = 'good';
       if (avgScore < 50) {
         status = 'bad';
@@ -66,17 +69,19 @@ export default function PhonemeKaraokeVisualizer({
         status = 'medium';
       }
 
-      return {
+      data.push({
         word,
         score: avgScore,
         status,
         startIndex,
-        endIndex: startIndex + charCount
-      };
-    });
+        endIndex
+      });
+    }
+
+    return data;
   }, [expectedWord, charScores]);
 
-  // Total words count and time allocated per word
+  // Total words count and time allocated per word (fallback when exact wordTimestamps is absent)
   const totalWords = wordsData.length;
   const wordTimeSlot = duration > 0 && totalWords > 0 ? duration / totalWords : 1;
 
@@ -93,16 +98,23 @@ export default function PhonemeKaraokeVisualizer({
           // Word color based on score
           const colorHex = item.status === 'good' ? '#4ade80' : item.status === 'medium' ? '#facc15' : '#f87171';
 
-          // Calculate sweep progress (0% - 100%) for this specific word
+          // Calculate sweep progress (0% - 100%) using Wav2Vec2 wordTimestamps if available
           let sweepPercent = 0;
-          if (isPlaying && duration > 0) {
-            const wordStart = idx * wordTimeSlot;
-            const wordEnd = (idx + 1) * wordTimeSlot;
+          if (isPlaying) {
+            let wordStart = idx * wordTimeSlot;
+            let wordEnd = (idx + 1) * wordTimeSlot;
+            let wordDuration = wordTimeSlot;
+
+            if (wordTimestamps && wordTimestamps[idx]) {
+              wordStart = wordTimestamps[idx].start;
+              wordEnd = wordTimestamps[idx].end;
+              wordDuration = Math.max(0.05, wordEnd - wordStart);
+            }
 
             if (currentTime >= wordEnd) {
               sweepPercent = 100;
             } else if (currentTime >= wordStart) {
-              sweepPercent = Math.min(100, Math.max(0, ((currentTime - wordStart) / wordTimeSlot) * 100));
+              sweepPercent = Math.min(100, Math.max(0, ((currentTime - wordStart) / wordDuration) * 100));
             } else {
               sweepPercent = 0;
             }

@@ -131,15 +131,22 @@ export default function DarkAudioPlayer({
     }
   }, [autoPlay, audioUrl, rawAudioUrl]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (isPlaying) {
       audioRef.current?.pause();
       rawAudioRef.current?.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current?.play();
-      rawAudioRef.current?.play();
       setIsPlaying(true);
+      try {
+        const p1 = audioRef.current?.play();
+        const p2 = rawAudioRef.current?.play();
+        if (p1) await p1;
+        if (p2) await p2;
+      } catch (err) {
+        console.warn('Playback prevented or interrupted:', err);
+        setIsPlaying(false);
+      }
     }
   };
 
