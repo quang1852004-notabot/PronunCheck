@@ -109,6 +109,11 @@ export default function AudioRecorder({ onAudioReady, disabled = false }: AudioR
         throw new Error(`Denoise API error: ${response.statusText}`);
       }
 
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('audio')) {
+        throw new Error('Invalid audio response format from server');
+      }
+
       const denoisedBlob = await response.blob();
       setRecordedRawBlob(rawBlob);
       setRecordedDenoisedBlob(denoisedBlob);

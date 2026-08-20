@@ -196,7 +196,13 @@ def denoise_audio_endpoint(
         return FileResponse(out_path, media_type="audio/wav", filename="denoised.wav")
     except Exception as e:
         print(f"Error in /denoise: {e}")
-        return {"error": str(e)}
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    finally:
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
 
 @app.post("/api/v1/assess")
 def assess_pronunciation(
