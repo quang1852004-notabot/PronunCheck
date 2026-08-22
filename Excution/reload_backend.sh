@@ -23,6 +23,14 @@ echo "=================================================="
 sudo systemctl restart pronuncheck-backend
 
 echo "=================================================="
-echo " [4/4] Trạng thái dịch vụ:"
+echo " [4/5] Trạng thái dịch vụ Systemd:"
 echo "=================================================="
 sudo systemctl status pronuncheck-backend --no-pager -l
+
+echo ""
+echo "=================================================="
+echo " [5/5] Kiểm tra phản hồi thực tế từ API (/health)..."
+echo "=================================================="
+sleep 2
+curl -s http://127.0.0.1:8000/health | python3 -m json.tool 2>/dev/null || curl -s http://127.0.0.1:8000/health || echo "[WARN] API chưa phản hồi ngay (có thể đang warm-up model)..."
+echo ""

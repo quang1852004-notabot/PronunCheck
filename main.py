@@ -151,21 +151,89 @@ app.add_middleware(
 )
 
 
+import time
+START_TIME = time.time()
+
+
 # ==============================================================================
 # 5. API ENDPOINTS
 # ==============================================================================
 @app.get("/")
+@app.get("/health")
+@app.get("/api/v1/health")
 def health_check():
+    """
+    Endpoint kiểm tra trạng thái sức khỏe toàn diện của Backend Service và các AI Model.
+    Không cần đăng nhập client hay gửi file âm thanh vẫn biết server có hoạt động thực sự hay không.
+    """
+    whisper_ready = whisper_model is not None
+    w2v_ready = (w2v_model is not None and w2v_processor is not None)
+    all_ready = whisper_ready and w2v_ready
+    
     return {
-        "status": "online",
+        "status": "healthy" if all_ready else "degraded",
         "service": "PronunCheck AI Backend",
-        "tier": "Light_ScoringBackend (AI V3.5)",
+        "version": "3.5",
+        "device": config.DEVICE.upper(),
+        "compute_type": config.COMPUTE_TYPE,
+        "uptime_seconds": round(time.time() - START_TIME, 2),
         "models": {
-            "asr": config.WHISPER_MODEL_NAME,
-            "phonetic": config.WAV2VEC_MODEL_NAME,
-            "intonation": "F0 FastDTW (pYIN Semitones)"
-        }
+            "faster_whisper": {
+                "loaded": whisper_ready,
+                "model_name": config.WHISPER_MODEL_NAME
+            },
+            "wav2vec2_ctc": {
+                "loaded": w2v_ready,
+                "model_name": config.WAV2VEC_MODEL_NAME
+            },
+            "fast_dtw_f0": {
+                "loaded": True,
+                "method": "pYIN Semitones + Google TTS"
+            }
+        },
+        "ready_for_scoring": all_ready
     }
+
+@app.get("/api/v1/health/selftest")
+def health_selftest():
+    """
+    Tự động thực hiện một chu trình chấm điểm giả lập (Self-Test Inference) 
+    để kiểm tra xem toàn bộ pipeline PyTorch, Whisper và DTW có thực sự tính toán được không.
+    """
+    t0 = time.time()
+    try:
+        dummy_audio = np.zeros(16000, dtype=np.float32)
+        test_word = "Schule"
+        
+        # Test wav2vec2 alignment
+        p_score, char_scores, worst_char = scoring.analyze_precise_score(
+            dummy_audio, test_word, w2v_model, w2v_processor, vocab_dict
+        )
+        # Test whisper
+        w_score = scoring.analyze_with_whisperx(dummy_audio, test_word, whisper_model)
+        # Test dtw
+        dtw_score = scoring.calculate_dtw_score(dummy_audio, test_word)
+        # Test dynamic scoring
+        res = scoring.calculate_dynamic_score(p_score, w_score, dtw_score, test_word, worst_char)
+        
+        duration_ms = round((time.time() - t0) * 1000, 2)
+        return {
+            "status": "success",
+            "self_test": "PASSED",
+            "inference_duration_ms": duration_ms,
+            "test_word": test_word,
+            "sample_assessment": res
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "self_test": "FAILED",
+                "message": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
 
 from fastapi.responses import FileResponse
 

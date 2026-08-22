@@ -40,7 +40,12 @@ def convert_to_ipa(batch):
         ipa = re.sub(r'\s+', ' ', ipa).strip()
         clean_ipas.append(ipa)
     return {"ipa": clean_ipas}
+# --- CHÈN THÊM DÒNG NÀY ---
+print("Đang quét và loại bỏ các dòng bị lỗi null/trống...")
+dataset = dataset.filter(lambda x: x["text"] is not None and isinstance(x["text"], str) and len(x["text"].strip()) > 0, num_proc=4)
 
+# --- DÒNG CŨ GIỮ NGUYÊN ---
+dataset = dataset.map(convert_to_ipa, batched=True, batch_size=1000, num_proc=4)
 # Map song song chỉ trên Text, cách ly hoàn toàn Audio
 dataset = dataset.map(convert_to_ipa, batched=True, batch_size=1000, num_proc=4)
 # Dùng input_columns=["ipa"] để ép Hugging Face không bung file Audio lúc filter

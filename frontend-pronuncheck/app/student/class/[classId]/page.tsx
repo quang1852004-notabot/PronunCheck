@@ -533,10 +533,21 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                                   )}
 
                                   {submittingId === assignment.id && (
-                                    <div className="space-y-4 pt-4 border-t border-gray-700/80 animate-pulse mt-4">
-                                      <div className="h-32 bg-gray-800/80 rounded-3xl border border-gray-700/50"></div>
-                                      <div className="h-12 bg-gray-800/80 rounded-xl border border-gray-700/50"></div>
-                                      <div className="h-24 bg-gray-800/80 rounded-2xl border border-gray-700/50"></div>
+                                    <div className="space-y-4 pt-6 border-t border-gray-700/80 mt-4 relative overflow-hidden">
+                                      {/* Animated overlay text */}
+                                      <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-900/40 backdrop-blur-[2px] rounded-3xl">
+                                        <div className="flex items-center gap-3 bg-gray-900/90 px-6 py-3 rounded-full border border-indigo-500/30 shadow-xl shadow-indigo-500/20">
+                                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-indigo-500 border-t-transparent"></div>
+                                          <span className="text-sm font-bold text-indigo-400 animate-pulse">🤖 AI đang phân tích âm thanh...</span>
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Shimmering Skeleton */}
+                                      <div className="relative z-0 space-y-4 opacity-50 animate-pulse">
+                                        <div className="h-32 bg-gray-800 rounded-3xl border border-gray-700/50"></div>
+                                        <div className="h-12 bg-gray-800 rounded-xl border border-gray-700/50"></div>
+                                        <div className="h-24 bg-gray-800 rounded-2xl border border-gray-700/50"></div>
+                                      </div>
                                     </div>
                                   )}
                                 </div>

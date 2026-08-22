@@ -136,38 +136,41 @@ export default function NoiseReductionSlider({
           className={`w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${currentConfig.accent}`}
         />
 
-        {/* Step Ticks (0, 1, 2, 3, 4) */}
-        <div className="flex justify-between items-center text-[10px] font-bold text-gray-500 px-1.5 pt-0.5">
-          {[0, 1, 2, 3, 4].map((step) => {
-            const isSelected = step === value;
-            return (
-              <button
-                key={step}
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  onChange(step);
-                  if (typeof window !== 'undefined') {
-                    try {
-                      localStorage.setItem('pronuncheck_noise_level', step.toString());
-                    } catch (_) {}
-                  }
-                }}
-                className={`transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
-                  isSelected ? 'text-white font-extrabold scale-110' : 'hover:text-gray-400'
-                }`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full transition-all ${
-                    isSelected ? currentConfig.dotColor : 'bg-gray-700'
+        {/* Step Ticks (0, 1, 2, 3, 4) - Using absolute positioning for perfect center alignment */}
+        <div className="relative w-full h-10 mt-1 px-2">
+          <div className="relative w-full h-full">
+            {[0, 1, 2, 3, 4].map((step) => {
+              const isSelected = step === value;
+              return (
+                <button
+                  key={step}
+                  type="button"
+                  disabled={disabled}
+                  style={{ left: `${step * 25}%`, transform: 'translateX(-50%)' }}
+                  onClick={() => {
+                    onChange(step);
+                    if (typeof window !== 'undefined') {
+                      try {
+                        localStorage.setItem('pronuncheck_noise_level', step.toString());
+                      } catch (_) {}
+                    }
+                  }}
+                  className={`absolute top-0 transition-all cursor-pointer flex flex-col items-center gap-1 ${
+                    isSelected ? 'text-white font-extrabold scale-110 z-10' : 'text-gray-500 hover:text-gray-400 z-0'
                   }`}
-                />
-                <span>
-                  {step === 0 ? 'Tắt' : step === 1 ? 'Nhẹ' : step === 2 ? 'Vừa' : step === 3 ? 'Mạnh' : 'Cực đoan'}
-                </span>
-              </button>
-            );
-          })}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full transition-all ${
+                      isSelected ? currentConfig.dotColor : 'bg-gray-700'
+                    }`}
+                  />
+                  <span className="text-[10px] whitespace-nowrap">
+                    {step === 0 ? 'Tắt' : step === 1 ? 'Nhẹ' : step === 2 ? 'Vừa' : step === 3 ? 'Mạnh' : 'Cực đoan'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
