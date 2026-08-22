@@ -604,13 +604,15 @@ export default function StudentClassPage({ params }: { params: Promise<{ classId
                                     isPlaying={isKaraokePlaying}
                                   />
                                   
-                                  {/* Character-Level Diagnostic Card */}
+                                  {/* Character-Level Diagnostic Card (Temporarily Disabled for Premium HuBERT upgrade) */}
+                                  {/* 
                                   <PhonemeDiagnosticCard
                                     worstChar={displayWorstChar}
                                     expectedWord={assignment.word}
                                     feedback={displayFeedback || ''}
                                     isPassed={displayIsPassed}
                                   />
+                                  */}
                                 </div>
                               )}
 

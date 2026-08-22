@@ -337,13 +337,15 @@ export default function FreeModePage() {
                     isPlaying={isKaraokePlaying}
                   />
 
-                  {/* Character-Level Diagnostic Card */}
+                  {/* Character-Level Diagnostic Card (Temporarily Disabled for Premium HuBERT upgrade) */}
+                  {/*
                   <PhonemeDiagnosticCard
                     worstChar={result.worstChar}
                     expectedWord={word}
                     feedback={result.feedback}
                     isPassed={result.passed}
                   />
+                  */}
 
                   <div className="text-center pt-2">
                     <button
